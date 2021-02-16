@@ -67,18 +67,25 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
     memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
     BLE_devices[ NumDevices ].DataSize = BLEDataSize;
     BLE_devices[ NumDevices ].Changed = true;
+    BLE_devices[ NumDevices ].rssi = rssi;
     Changed = true;
     NumDevices++;
 
     return true;
 }
 
+// Return true if the device data is the same
 bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize )
 {
     if (BLEDataSize != BLE_devices[ Index ].DataSize)
     {
         return false;
     }
+
+    // if ((BLE_devices[ Index ].rssi < (rssi - 5)) || (BLE_devices[ Index ].rssi > (rssi + 5)))
+    // {
+    //     return false;
+    // }
 
     return ( memcmp( BLE_devices[ Index ].Data, BLEData, BLE_devices[ Index ].DataSize ) == 0 );
 }
@@ -88,6 +95,7 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_
     memcpy( BLE_devices[ Index ].Data, BLEData, BLE_devices[ Index ].DataSize );
     BLE_devices[ Index ].DataSize = BLEDataSize;
     BLE_devices[ Index ].Changed = true;
+    BLE_devices[ Index ].rssi = rssi;
     Changed = true;
 
     //    Serial.printf("Updated %s @ %i\n",  BLE_devices[ Index ].MAC, Index );
@@ -122,7 +130,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize )
         if (Device.model == 'H')
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"H\",\"modelName\":\"WoHand\",\"mode\":%s,\"battery\":%i,\"state\":%i}}",
-                ( Device.bot.mode ? "true" : "false" ), Device.curtain.battery, Device.bot.state );
+                ( Device.bot.mode ? "true" : "false" ), Device.bot.battery, Device.bot.state );
 
             return bytes;
         }
@@ -298,7 +306,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
         Serial.println( "Request to add URI failed: URI is not defined" );
         return false;
     }
-    
+
     Serial.printf( "Request to add: %s\n", url );
 
     for (uint8_t i = 0; i < NumCallbacks; i++)
@@ -338,7 +346,7 @@ bool ClientCallbacks::Remove( uint8_t Index )
     {
         Callbacks[ x ] = Callbacks[ x + 1 ];
     }
-    
+
     NumCallbacks--;
 }
 
@@ -348,7 +356,7 @@ bool ClientCallbacks::Remove( const char* url )
     {
         return false;
     }
-    
+
     for (uint8_t i = 0; i < NumCallbacks; i++)
     {
         // Search for the entry

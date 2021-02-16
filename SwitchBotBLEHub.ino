@@ -230,7 +230,7 @@ void setup()
     // scan to run for 5 seconds.
     BLEScan* pBLEScan = BLEDevice::getScan();
     pBLEScan->setAdvertisedDeviceCallbacks( new MyAdvertisedDeviceCallbacks(), true );
-    pBLEScan->setInterval( 310 );
+    pBLEScan->setInterval( 510 );
     pBLEScan->setWindow( 200 );
     pBLEScan->setActiveScan( true );
     pBLEScan->start( 0, nullptr, false );
@@ -373,6 +373,8 @@ void TaskBLEClient( void* pvParameters )  // This is a task.
             //            Serial.println( "No Changes" );
         }
 
+        OurCallbacks.Check( millis() );
+
         // if (BLEDevice::getInitialized())
         // {
         //     // Re-initialise the BLE stack to ensure it picks up the devices again
@@ -390,7 +392,8 @@ void TaskWebserver( void* pvParameters )  // This is a task.
 
     for (;;)
     {
-        OurCallbacks.Check( millis() );
+//        OurCallbacks.Check( millis() );
         server.handleClient();
+        vTaskDelay( 100 );
     }
 }
