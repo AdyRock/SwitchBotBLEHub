@@ -166,6 +166,7 @@ void setup()
 
     if (MDNS.begin( "switchbotble" ))
     {
+        MDNS.enableWorkstation();
         Serial.println( "MDNS responder started" );
     }
 
@@ -394,6 +395,6 @@ void TaskWebserver( void* pvParameters )  // This is a task.
     {
 //        OurCallbacks.Check( millis() );
         server.handleClient();
-        vTaskDelay( 100 );
+//        vTaskDelay( 100 );
     }
 }
