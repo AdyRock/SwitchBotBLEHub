@@ -7,16 +7,10 @@
    https://github.com/nkolban/esp32-snippets/blob/master/Documentation/BLE%20C%2B%2B%20Guide.pdf
 */
 
-#if CONFIG_FREERTOS_UNICORE
-#define ARDUINO_RUNNING_CORE 0
-#else
-#define ARDUINO_RUNNING_CORE 1
-#endif
-
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
-#include <WebServer.h>
+#include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include "BLE_Device.h"
 
@@ -30,10 +24,7 @@ ClientCallbacks OurCallbacks;
 String bleClientAddress;
 String bleDataToWrite;
 
-void TaskWebserver( void* pvParameters );
-void TaskBLEClient( void* pvParameters );
-
-WebServer server( 80 );
+AsyncWebServer server( 80 );
 
 const int led = 13;
 
@@ -46,29 +37,29 @@ static BLEUUID serviceUUID( "cba20d00-224d-11e6-9fb8-0002a5d5c51b" );
 // The characteristic of the remote service we are interested in.
 static BLEUUID    charUUID( "cba20002-224d-11e6-9fb8-0002a5d5c51b" );
 
-void handleRoot()
+void handleRoot( AsyncWebServerRequest* request )
 {
     digitalWrite( led, 1 );
-    server.send( 200, "text/plain", "hello from SwitchBot BLE Hub!" );
+    request->send( 200, "text/plain", "hello from SwitchBot BLE Hub!" );
     digitalWrite( led, 0 );
 }
 
-void handleNotFound()
+void handleNotFound( AsyncWebServerRequest* request )
 {
     digitalWrite( led, 1 );
     String message = "File Not Found\n\n";
     message += "URI: ";
-    message += server.uri();
+    message += request->url();
     message += "\nMethod: ";
-    message += ( server.method() == HTTP_GET ) ? "GET" : "POST";
+    message += ( request->method() == HTTP_GET ) ? "GET" : "POST";
     message += "\nArguments: ";
-    message += server.args();
+    message += request->args();
     message += "\n";
-    for (uint8_t i = 0; i < server.args(); i++)
+    for (uint8_t i = 0; i < request->args(); i++)
     {
-        message += " " + server.argName( i ) + ": " + server.arg( i ) + "\n";
+        message += " " + request->argName( i ) + ": " + request->arg( i ) + "\n";
     }
-    server.send( 404, "text/plain", message );
+    request->send( 404, "text/plain", message );
     digitalWrite( led, 0 );
 }
 
@@ -164,71 +155,97 @@ void setup()
 
     server.on( "/", handleRoot );
 
-    server.on( "/api/v1/devices", []()
+
+
+    server.onRequestBody(
+        []( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
+        {
+            if (request->method() == HTTP_POST)
+            {
+                if (request->url() == "/api/v1/callback/add")
+                {
+                    const size_t        JSON_DOC_SIZE = 512U;
+                    DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
+
+                    if (DeserializationError::Ok == deserializeJson( jsonDoc, (const char*)data ))
+                    {
+                        JsonObject callbackAddress = jsonDoc.as<JsonObject>();
+                        if (OurCallbacks.Add( callbackAddress[ "uri" ], millis() ))
+                        {
+                            String msg = "OK";
+                            request->send( 200, "text/plain", msg );
+                        }
+                        else
+                        {
+                            String msg = "Bad Request";
+                            request->send( 400, "text/plain", msg );
+                        }
+                    }
+                    else
+                    {
+                        String msg = "Bad Request";
+                        request->send( 400, "text/plain", msg );
+                    }
+                }
+                else if (request->url() == "/api/v1/callback/remove")
+                {
+                    const size_t        JSON_DOC_SIZE = 512U;
+                    DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
+
+                    if (DeserializationError::Ok == deserializeJson( jsonDoc, (const char*)data ))
+                    {
+                        JsonObject callbackAddress = jsonDoc.as<JsonObject>();
+                        if (OurCallbacks.Remove( (const char*)callbackAddress[ "uri" ] ))
+                        {
+                            request->send( 200, "text/plain", "OK" );
+                        }
+                        else
+                        {
+                            request->send( 400, "text/plain", "Bad Request" );
+                        }
+                    }
+                    else
+                    {
+                        String msg = "Bad Request";
+                        request->send( 400, "text/plain", msg );
+                    }
+                }
+                else if (request->url() == "/api/v1/device/write")
+                {
+                    const size_t        JSON_DOC_SIZE = 512U;
+                    DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
+
+                    if (DeserializationError::Ok == deserializeJson( jsonDoc, (const char*)data ))
+                    {
+                        JsonObject writeParameters = jsonDoc.as<JsonObject>();
+                        String clientAddress = writeParameters[ "address" ];
+                        String dataToWrite = writeParameters[ "data" ];
+                        Serial.printf( "Received request to write device %s with %s (%i)\n", bleClientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length() );
+
+                        bleClientAddress = clientAddress;
+                        bleDataToWrite = dataToWrite;
+                        request->send( 200, "text/plain", "OK" );
+                    }
+                    else
+                    {
+                        String msg = "Bad Request";
+                        request->send( 400, "text/plain", msg );
+                    }
+                }
+            }
+        }
+    );
+
+    server.on( "/api/v1/devices", HTTP_GET, []( AsyncWebServerRequest* request )
         {
             Serial.println( "Received request for devices" );
             char* buf = (char*)malloc( 2048 );
             BLE_Devices.AllToJson( buf, 2048, false );
             Serial.println( buf );
-            server.send( 200, "application/json", buf );
+            request->send( 200, "application/json", buf );
             free( buf );
         } );
 
-    server.on( "/api/v1/device/write", HTTP_POST, []()
-        {
-            //Handling function implementation
-            String body = server.arg( "plain" );
-            DynamicJsonDocument doc( 500 );
-            deserializeJson( doc, body );
-            JsonObject writeParameters = doc.as<JsonObject>();
-            String clientAddress = writeParameters[ "address" ];
-            String dataToWrite = writeParameters[ "data" ];
-            Serial.printf( "Received request to write device %s with %s (%i)\n", bleClientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length() );
-
-            bleClientAddress = clientAddress;
-            bleDataToWrite = dataToWrite;
-
-            String msg = "OK";
-            server.send( 200, "text/plain", msg );
-        } );
-
-
-    server.on( "/api/v1/callback/add", HTTP_POST, []()
-        {
-            //Handling function implementation
-            String body = server.arg( "plain" );
-            DynamicJsonDocument doc( 500 );
-            deserializeJson( doc, body );
-            JsonObject callbackAddress = doc.as<JsonObject>();
-            if (OurCallbacks.Add( callbackAddress[ "uri" ], millis() ))
-            {
-                String msg = "OK";
-                server.send( 200, "text/plain", msg );
-            }
-            else
-            {
-                String msg = "Bad Request";
-                server.send( 400, "text/plain", msg );
-            }
-        } );
-
-    server.on( "/api/v1/callback/remove", HTTP_POST, []()
-        {
-            //Handling function implementation
-            String body = server.arg( "plain" );
-            Serial.println( body );
-            DynamicJsonDocument doc( 500 );
-            deserializeJson( doc, body );
-            JsonObject callbackAddress = doc.as<JsonObject>();
-            if (OurCallbacks.Remove( (const char*)callbackAddress[ "uri" ] ))
-            {
-                server.send( 200, "text/plain", "OK" );
-            }
-            else
-            {
-                server.send( 400, "text/plain", "Bad Request" );
-            }
-        } );
 
     server.onNotFound( handleNotFound );
 
@@ -245,26 +262,6 @@ void setup()
     pBLEScan->setActiveScan( true );
     pBLEScan->start( 0, nullptr, false );
 
-    xTaskCreatePinnedToCore(
-        TaskBLEClient
-        , "TaskBLEClient"   // A name just for humans
-        , 4096  // This stack size can be checked & adjusted by reading the Stack Highwater
-        , NULL
-        , 2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-        , NULL
-        , ARDUINO_RUNNING_CORE );
-
-
-    xTaskCreatePinnedToCore(
-        TaskWebserver
-        , "TaskWebserver"   // A name just for humans
-        , 4096  // This stack size can be checked & adjusted by reading the Stack Highwater
-        , NULL
-        , 1  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-        , NULL
-        , ARDUINO_RUNNING_CORE );
-
-
     Serial.println( "Application started" );
 
 } // End of setup.
@@ -272,68 +269,6 @@ void setup()
 
 // This is the Arduino main loop function.
 void loop()
-{
-
-} // End of loop
-
-int SendDeviceChange( const char* host )
-{
-    //host = "192.168.1.1" ip or dns
-
-    char* buf = (char*)malloc( 2048 );
-    int bytes = BLE_Devices.AllToJson( buf, 2048, true );
-
-    Serial.print( "Connecting to " );
-    Serial.println( host );
-
-    HTTPClient http;
-
-    // configure target server and url
-    http.begin( host ); //HTTP
-    http.addHeader( "Content-Type", "application/json" );
-
-    Serial.print( "Sending: " );
-    Serial.println( buf );
-
-    // start connection and send HTTP header
-    int httpCode = http.POST( (uint8_t*)buf, bytes );
-
-    // httpCode will be negative on error
-    if (httpCode > 0)
-    {
-        // HTTP header has been send and Server response header has been handled
-        Serial.printf( "[HTTP] POST... code: %d\n", httpCode );
-    }
-    else
-    {
-        Serial.printf( "[HTTP] POST... failed, code %i, error: %s\n", httpCode, http.errorToString( httpCode ).c_str() );
-    }
-
-    http.end();
-
-    free( buf );
-
-    return httpCode;
-}
-void SendChangedDevices()
-{
-    // This object changed so send to registered callbacks
-    char* buf = (char*)malloc( 256 );
-    uint8_t i = 0;
-    while (OurCallbacks.Get( i++, buf, 255 ))
-    {
-        Serial.println( "Sending Device Changes" );
-        if (SendDeviceChange( buf ) == -1)
-        {
-            // remove refused connection
-            i--;
-            OurCallbacks.Remove( i );
-        }
-    }
-    free( buf );
-}
-
-void TaskBLEClient( void* pvParameters )  // This is a task.
 {
     for (;;)
     {
@@ -465,23 +400,65 @@ void TaskBLEClient( void* pvParameters )  // This is a task.
         }
 
         OurCallbacks.Check( millis() ); // Check if any of the registered callbacks have timedout
-
-        vTaskDelay( 500 ); // Delay a second between loops.
     } // end of endless loop ;-)
-}
-void TaskWebserver( void* pvParameters )  // This is a task.
+
+} // End of loop
+
+int SendDeviceChange( const char* host )
 {
-    (void)pvParameters;
+    //host = "192.168.1.1" ip or dns
 
-    for (;;)
+    char* buf = (char*)malloc( 2048 );
+    int bytes = BLE_Devices.AllToJson( buf, 2048, true );
+
+    Serial.print( "Connecting to " );
+    Serial.println( host );
+
+    HTTPClient http;
+
+    // configure target server and url
+    http.begin( host ); //HTTP
+    http.addHeader( "Content-Type", "application/json" );
+
+    Serial.print( "Sending: " );
+    Serial.println( buf );
+
+    // start connection and send HTTP header
+    int httpCode = http.POST( (uint8_t*)buf, bytes );
+
+    // httpCode will be negative on error
+    if (httpCode > 0)
     {
-        server.handleClient();
+        // HTTP header has been send and Server response header has been handled
+        Serial.printf( "[HTTP] POST... code: %d\n", httpCode );
+    }
+    else
+    {
+        Serial.printf( "[HTTP] POST... failed, code %i, error: %s\n", httpCode, http.errorToString( httpCode ).c_str() );
+    }
 
-        if (bleDataToWrite.length() > 0)
+    http.end();
+
+    free( buf );
+
+    return httpCode;
+}
+
+void SendChangedDevices()
+{
+    // This object changed so send to registered callbacks
+    char* buf = (char*)malloc( 256 );
+    uint8_t i = 0;
+    while (OurCallbacks.Get( i++, buf, 255 ))
+    {
+        Serial.println( "Sending Device Changes" );
+        if (SendDeviceChange( buf ) == -1)
         {
-            // We need to handle writing to a BLE device so make sure it has some processing time
-            vTaskDelay( 100 );
+            // remove refused connection
+            i--;
+            OurCallbacks.Remove( i );
         }
     }
+    free( buf );
 }
 
