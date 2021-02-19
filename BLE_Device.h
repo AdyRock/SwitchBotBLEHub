@@ -4,6 +4,12 @@
 #include <Arduino.h>
 #include <stdint.h>
 
+typedef struct BLE_COMMAND
+{
+    char Address[ 18 ];
+    uint8_t Data[ 20 ];
+    int8_t DataLen;
+};
 typedef struct BLE_DEVICE
 {
     char MAC[ 18 ];
@@ -99,4 +105,22 @@ public:
     void Check( unsigned long t );   // Call this periodically to remove expired callbacks
     bool HasCallbacks();
 };
+
+class CommandQ
+{
+private:
+    #define QSize 20
+    BLE_COMMAND Callbacks[ QSize ];
+    int NumQd;
+    int QEntry;
+    int QExit;
+
+public:
+    CommandQ();
+    ~CommandQ();
+
+    bool Push( String Address, String Data );
+    bool Pop( BLE_COMMAND* pBLE_Command );
+};
+
 #endif

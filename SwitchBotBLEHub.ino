@@ -21,14 +21,15 @@ const char* password = WIFI_PASS;
 
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
-String bleClientAddress;
-String bleDataToWrite;
 
+CommandQ BLECommandQ;
 AsyncWebServer server( 80 );
 
 const int led = 13;
 
-#include "BLEDevice.h"
+//#include "BLEDevice.h"
+#include <NimBLEDevice.h>
+
 #include <ArduinoJson.h>
 #include <heltec.h>
 
@@ -99,27 +100,14 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
     /**
         Called for each advertising BLE server.
     */
-    void onResult( BLEAdvertisedDevice advertisedDevice )
+    void onResult( BLEAdvertisedDevice* advertisedDevice )
     {
         // We have found a device, let us now see if it contains the service we are looking for.
-        if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService( serviceUUID ))
+        if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService( serviceUUID ))
         {
-            // Serial.print( "\nService UUID = " );
-            // Serial.print( advertisedDevice.getServiceDataUUID().toString().c_str() );
-            // Serial.print( " Address = " );
-            // Serial.print( advertisedDevice.getAddress().toString().c_str() );
-            // Serial.print( " Service adata:  = " );
-            // char* pHex = BLEUtils::buildHexData( nullptr, (uint8_t*)advertisedDevice.getServiceData().data(), advertisedDevice.getServiceData().length() );
-            // Serial.println( pHex );
-            // Serial.println( "" );
-
-            BLE_Devices.AddDevice( advertisedDevice.getAddress().toString().c_str(), advertisedDevice.getRSSI(), (uint8_t*)advertisedDevice.getServiceData().data(), advertisedDevice.getServiceData().length() );
+            BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), (uint8_t*)advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length() );
         }
-        else
-        {
-            //Serial.println( "Wrong service ID" );
-        }
-    } // onResult
+    }; // onResult
 }; // MyAdvertisedDeviceCallbacks
 
 void setup()
@@ -177,8 +165,8 @@ void setup()
                         }
                         else
                         {
-                            String msg = "Bad Request";
-                            request->send( 400, "text/plain", msg );
+                            String msg = "Too Many Requests";
+                            request->send( 429, "text/plain", msg );
                         }
                     }
                     else
@@ -220,11 +208,17 @@ void setup()
                         JsonObject writeParameters = jsonDoc.as<JsonObject>();
                         String clientAddress = writeParameters[ "address" ];
                         String dataToWrite = writeParameters[ "data" ];
-                        Serial.printf( "Received request to write device %s with %s (%i)\n", bleClientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length() );
+                        Serial.printf( "Received request to write device %s with %s (%i)\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length() );
 
-                        bleClientAddress = clientAddress;
-                        bleDataToWrite = dataToWrite;
-                        request->send( 200, "text/plain", "OK" );
+                        if (BLECommandQ.Push( clientAddress, dataToWrite ))
+                        {
+                            request->send( 200, "text/plain", "OK" );
+                        }
+                        else
+                        {
+                            String msg = "Too Many Requests";
+                            request->send( 429, "text/plain", msg );
+                        }
                     }
                     else
                     {
@@ -252,6 +246,8 @@ void setup()
     server.begin();
     Serial.println( "HTTP server started" );
 
+    BLEDevice::init( "" );
+
     // Retrieve a Scanner and set the callback we want to use to be informed when we
     // have detected a new device.  Specify that we want active scanning and start the
     // scan to run for 5 seconds.
@@ -272,86 +268,11 @@ void loop()
 {
     for (;;)
     {
-        size_t dataLen = bleDataToWrite.length();
-        if (dataLen > 0)
+        // Check if there is a BLE command to send
+        BLE_COMMAND BLECommand;
+        if (BLECommandQ.Pop( &BLECommand ))
         {
-            BLEClient* pBLEClient = BLEDevice::createClient();
-            Serial.println( "Client created" );
-
-            BLEScan* pBLEScan = BLEDevice::getScan();
-            pBLEScan->stop();
-            vTaskDelay( 100 ); // Delay a second between loops.
-
-            BLEAddress bleAddress( bleClientAddress.c_str() );
-            uint8_t buf[ 10 ];
-
-            const char* data = bleDataToWrite.c_str();
-            char* endPtr = (char*)data;
-
-            Serial.printf( "Converting string %s to buffer", endPtr );
-
-            int i = 0;
-            do
-            {
-                endPtr++;
-                buf[ i ] = strtol( endPtr, &endPtr, 10 );
-                Serial.printf( "%i, ", buf[ i ] );
-                i++;
-            }
-            while (( endPtr != nullptr ) && ( *endPtr != 0 ) && ( i < 10 ));
-
-            Serial.printf( "bytes = %i\n", i );
-
-
-            bool complete = false;
-            int retries = 5;
-            while (!complete && ( retries-- > 0 ))
-            {
-                Serial.println( "Connecting to client..." );
-                if (pBLEClient->connect( bleAddress, BLE_ADDR_TYPE_PUBLIC ))
-                {
-                    Serial.println( "Client connected" );
-
-                    BLERemoteService* rs = pBLEClient->getService( serviceUUID );
-                    if (rs != nullptr)
-                    {
-                        Serial.println( "Got remote service" );
-
-                        BLERemoteCharacteristic* rc = rs->getCharacteristic( charUUID );
-                        if (rs != nullptr)
-                        {
-                            Serial.println( "Got remote characteristic" );
-
-                            rc->writeValue( buf, i );
-                            Serial.println( "Date sent" );
-                            complete = true;
-                        }
-                        else
-                        {
-                            Serial.println( "Failed to get characteristic" );
-                        }
-                    }
-                    else
-                    {
-                        Serial.println( "Failed to get service" );
-                    }
-
-                    pBLEClient->disconnect();
-                    Serial.println( "Disconnect client" );
-                }
-                else
-                {
-                    Serial.println( "Failed to connected to client" );
-                }
-
-                if (!complete)
-                {
-                    vTaskDelay( 200 );
-                }
-            }
-            bleDataToWrite = "";
-
-            pBLEScan->start( 0, nullptr, false );
+            WriteToBLEDevice( &BLECommand );
         }
 
         if (BLE_Devices.HasChanged())
@@ -391,12 +312,6 @@ void loop()
 
             // write the buffer to the display
             Heltec.display->display();
-
-            BLE_Devices.ClearChanged();
-        }
-        else
-        {
-            //            Serial.println( "No Changes" );
         }
 
         OurCallbacks.Check( millis() ); // Check if any of the registered callbacks have timedout
@@ -404,12 +319,9 @@ void loop()
 
 } // End of loop
 
-int SendDeviceChange( const char* host )
+int SendDeviceChange( const char* host, const char* data, int bytes )
 {
     //host = "192.168.1.1" ip or dns
-
-    char* buf = (char*)malloc( 2048 );
-    int bytes = BLE_Devices.AllToJson( buf, 2048, true );
 
     Serial.print( "Connecting to " );
     Serial.println( host );
@@ -420,11 +332,8 @@ int SendDeviceChange( const char* host )
     http.begin( host ); //HTTP
     http.addHeader( "Content-Type", "application/json" );
 
-    Serial.print( "Sending: " );
-    Serial.println( buf );
-
     // start connection and send HTTP header
-    int httpCode = http.POST( (uint8_t*)buf, bytes );
+    int httpCode = http.POST( (uint8_t*)data, bytes );
 
     // httpCode will be negative on error
     if (httpCode > 0)
@@ -439,26 +348,100 @@ int SendDeviceChange( const char* host )
 
     http.end();
 
-    free( buf );
-
     return httpCode;
 }
 
 void SendChangedDevices()
 {
     // This object changed so send to registered callbacks
-    char* buf = (char*)malloc( 256 );
+    char* deviceBuf = (char*)malloc( 2048 );
+    int bytes = BLE_Devices.AllToJson( deviceBuf, 2048, true );
+
+    Serial.print( "Sending: " );
+    Serial.println( deviceBuf );
+
+    char* addresBuf = (char*)malloc( 256 );
     uint8_t i = 0;
-    while (OurCallbacks.Get( i++, buf, 255 ))
+    while (OurCallbacks.Get( i++, addresBuf, 255 ))
     {
         Serial.println( "Sending Device Changes" );
-        if (SendDeviceChange( buf ) == -1)
+        if (SendDeviceChange( addresBuf, deviceBuf, bytes ) == -1)
         {
             // remove refused connection
             i--;
             OurCallbacks.Remove( i );
         }
     }
-    free( buf );
+
+    free( addresBuf );
+    free( deviceBuf );
 }
 
+void WriteToBLEDevice( BLE_COMMAND* BLECommand )
+{
+    BLEScan* pBLEScan = BLEDevice::getScan();
+    pBLEScan->stop();
+
+    bool complete = false;
+    int retries = 5;
+
+    BLEAddress bleAddress( BLECommand->Address );
+
+    while (!complete && ( retries-- > 0 ))
+    {
+        NimBLEScanResults results = pBLEScan->start( 2 );
+        for (int i = 0; ( i < results.getCount() ) && !complete; i++)
+        {
+            NimBLEAdvertisedDevice device = results.getDevice( i );
+
+            if (device.getAddress() == bleAddress)
+            {
+                NimBLEClient* pBLEClient = NimBLEDevice::createClient();
+
+                Serial.println( "Connecting to client..." );
+                if (pBLEClient->connect( &device ))
+                {
+                    //success
+                    Serial.println( "Client connected" );
+
+                    BLERemoteService* rs = pBLEClient->getService( serviceUUID );
+                    if (rs != nullptr)
+                    {
+                        Serial.println( "Got remote service" );
+
+                        BLERemoteCharacteristic* rc = rs->getCharacteristic( charUUID );
+                        if (rs != nullptr)
+                        {
+                            Serial.println( "Got remote characteristic" );
+
+                            rc->writeValue( BLECommand->Data, BLECommand->DataLen );
+                            Serial.println( "Date sent" );
+                            complete = true;
+                        }
+                        else
+                        {
+                            Serial.println( "Failed to get characteristic" );
+                        }
+                    }
+                    else
+                    {
+                        Serial.println( "Failed to get service" );
+                    }
+
+                    pBLEClient->disconnect();
+                    Serial.println( "Disconnect client" );
+                }
+                else
+                {
+                    Serial.println( "Failed to connected to client" );
+                }
+
+                NimBLEDevice::deleteClient( pBLEClient );
+                break;
+            }
+        }
+    }
+
+    pBLEScan->start( 0, nullptr, false );
+
+}

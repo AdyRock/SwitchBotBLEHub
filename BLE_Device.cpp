@@ -149,6 +149,11 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize )
 
 int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged )
 {
+    if (OnlyChanged)
+    {
+        Changed = false;
+    }
+
     int totaleBytes = 1;
     *Buf = '[';
     for (uint8_t i = 0; i < NumDevices; i++)
@@ -158,9 +163,14 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged )
             break;
         }
 
-        if (OnlyChanged && !BLE_devices[ i ].Changed)
+        if (OnlyChanged)
         {
-            continue;
+            if (!BLE_devices[ i ].Changed)
+            {
+                continue;
+            }
+
+            BLE_devices[ i ].Changed = false;
         }
 
         int bytes = DeviceToJson( i, Buf + totaleBytes, BufSize - totaleBytes );
@@ -385,4 +395,76 @@ void ClientCallbacks::Check( unsigned long t )
 bool ClientCallbacks::HasCallbacks()
 {
     return ( NumCallbacks > 0 );
+}
+
+CommandQ::CommandQ()
+{
+    NumQd = 0;
+    QEntry = 0;
+    QExit = 0;
+}
+
+CommandQ::~CommandQ()
+{
+
+}
+
+bool CommandQ::Push( String Address, String Data )
+{
+    if (NumQd < QSize)
+    {
+        NumQd++;
+        
+        BLE_COMMAND* entry = &Callbacks[ QEntry++ ];
+        if (QEntry == QSize)
+        {
+            // Wrap entry index back to the beggining
+            QEntry = 0;
+        }
+
+        strcpy( entry->Address, Address.c_str() );
+
+        uint8_t* buf = entry->Data;
+        char* endPtr = (char*)Data.c_str();
+
+        Serial.printf( "Converting string %s to buffer: ", endPtr );
+
+        int bytes = 0;
+        do
+        {
+            endPtr++;
+            buf[ bytes ] = strtol( endPtr, &endPtr, 10 );
+            Serial.printf( "%i, ", buf[ bytes ] );
+            bytes++;
+        }
+        while (( endPtr != nullptr ) && ( *endPtr != 0 ) && ( bytes < 10 ));
+
+        Serial.printf( "bytes = %i\n", bytes );
+        entry->DataLen = bytes;
+
+        return true;
+    }
+
+    return false;
+}
+
+bool CommandQ::Pop( BLE_COMMAND* pBLE_Command )
+{
+    if (NumQd > 0)
+    {
+        NumQd--;
+        
+        BLE_COMMAND* pEntry = &Callbacks[ QExit++ ];
+        memcpy( pBLE_Command, pEntry, sizeof( BLE_COMMAND ) );
+
+        if (QExit == QSize)
+        {
+            // Wrap entry index back to the beggining
+            QExit = 0;
+        }
+
+        return true;
+    }
+
+    return false;
 }
