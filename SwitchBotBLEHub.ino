@@ -240,6 +240,20 @@ void setup()
             free( buf );
         } );
 
+    server.on( "/api/v1/device", HTTP_GET, []( AsyncWebServerRequest* request )
+        {
+            Serial.println( "Received request for device" );
+            String address = request->arg( "address" );
+
+            int deviceIdx = BLE_Devices.FindDevice( address.c_str() );
+            
+            char* buf = (char*)malloc( 2048 );
+            BLE_Devices.DeviceToJson( deviceIdx, buf, 2048 );
+            Serial.println( buf );
+            request->send( 200, "application/json", buf );
+            free( buf );
+        } );
+
 
     server.onNotFound( handleNotFound );
 
