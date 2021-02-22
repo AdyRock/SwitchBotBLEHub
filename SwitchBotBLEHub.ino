@@ -1,3 +1,4 @@
+
 /**
    A BLE client example that is rich in capabilities.
    There is a lot new capabilities implemented.
@@ -11,7 +12,7 @@
 #include <WiFiClient.h>
 #include <HTTPClient.h>
 #include <ESPAsyncWebServer.h>
-#include <ESPmDNS.h>
+#include <AsyncUDP.h>
 #include "BLE_Device.h"
 
 #include "secrets.h"    //Define a file called secrets.h and put in your WiFi SSID and Password as #defines. e.g. #define WIFI_SSIS "ROUTER_SSID"
@@ -24,8 +25,11 @@ ClientCallbacks OurCallbacks;
 
 CommandQ BLECommandQ;
 AsyncWebServer server( 80 );
+AsyncUDP udp;
 
 const int led = 13;
+byte mac[ 6 ];
+unsigned long sendBroadcast = 0;
 
 //#include "BLEDevice.h"
 #include <NimBLEDevice.h>
@@ -133,18 +137,11 @@ void setup()
     Serial.print( "IP address: " );
     Serial.println( WiFi.localIP() );
 
-    if (MDNS.begin( "switchbotble" ))
-    {
-        MDNS.enableWorkstation();
-        Serial.println( "MDNS responder started" );
-    }
-
     BLEDevice::init( "" );
 
     server.on( "/", handleRoot );
 
-
-
+    sendBroadcast = millis();
     server.onRequestBody(
         []( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
         {
@@ -207,17 +204,30 @@ void setup()
                     {
                         JsonObject writeParameters = jsonDoc.as<JsonObject>();
                         String clientAddress = writeParameters[ "address" ];
-                        String dataToWrite = writeParameters[ "data" ];
-                        Serial.printf( "Received request to write device %s with %s (%i)\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length() );
 
-                        if (BLECommandQ.Push( clientAddress, dataToWrite ))
+                        // Check that we have seen that device
+                        int deviceIdx = BLE_Devices.FindDevice( clientAddress.c_str() );
+                        if (deviceIdx >= 0)
                         {
-                            request->send( 200, "text/plain", "OK" );
+                            String dataToWrite = writeParameters[ "data" ];
+                            Serial.printf( "Received request to write device %s with %s (%i)\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length() );
+
+                            if (BLECommandQ.Push( clientAddress, dataToWrite ))
+                            {
+                                request->send( 200, "text/plain", "OK" );
+                            }
+                            else
+                            {
+                                String msg = "Too Many Requests";
+                                request->send( 429, "text/plain", msg );
+                                Serial.println( "I have too much in my command Q" );
+                            }
                         }
                         else
                         {
-                            String msg = "Too Many Requests";
-                            request->send( 429, "text/plain", msg );
+                            String msg = "Unknown device";
+                            request->send( 422, "text/plain", msg );
+                            Serial.printf( "Received request to write device but I have not seen that device)\n", clientAddress.c_str() );
                         }
                     }
                     else
@@ -246,7 +256,7 @@ void setup()
             String address = request->arg( "address" );
 
             int deviceIdx = BLE_Devices.FindDevice( address.c_str() );
-            
+
             char* buf = (char*)malloc( 2048 );
             BLE_Devices.DeviceToJson( deviceIdx, buf, 2048 );
             Serial.println( buf );
@@ -274,6 +284,32 @@ void setup()
 
     Serial.println( "Application started" );
 
+    WiFi.macAddress( mac );
+
+    if (udp.listenMulticast( IPAddress( 239, 1, 2, 3 ), 1234 ))
+    {
+        Serial.print( "UDP Listening on IP: " );
+        Serial.println( WiFi.localIP() );
+        udp.onPacket( []( AsyncUDPPacket packet )
+            {
+                Serial.println();
+                Serial.print( "UDP Packet: " );
+                Serial.print( ", Data: " );
+                Serial.write( packet.data(), packet.length() );
+                Serial.println();
+                String data( (const char*)packet.data() );
+                Serial.println( data.c_str() );
+                Serial.println();
+                if (data == "Are you there SwitchBot?")
+                {
+                    Serial.println( "Broadcasting logon ASAP" );
+                    sendBroadcast = millis();
+                    //reply to the client
+                    //packet.printf( "SwitchBot BLE Hub! %0.2x:%0.2x:%0.2x:%0.2x:%0.2x:%0.2x, ", mac[ 5 ], mac[ 4 ], mac[ 3 ], mac[ 2 ], mac[ 1 ], mac[ 0 ] );
+                }
+            } );
+    }
+
 } // End of setup.
 
 
@@ -282,6 +318,13 @@ void loop()
 {
     for (;;)
     {
+        if (millis() >= sendBroadcast)
+        {
+            //Send multicast
+            udp.printf( "SwitchBot BLE Hub! %0.2x:%0.2x:%0.2x:%0.2x:%0.2x:%0.2x, ", mac[ 5 ], mac[ 4 ], mac[ 3 ], mac[ 2 ], mac[ 1 ], mac[ 0 ] );
+            sendBroadcast = millis() + 30000;
+        }
+
         // Check if there is a BLE command to send
         BLE_COMMAND BLECommand;
         if (BLECommandQ.Pop( &BLECommand ))
