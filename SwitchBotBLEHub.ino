@@ -1,24 +1,14 @@
 
-/**
-   A BLE client example that is rich in capabilities.
-   There is a lot new capabilities implemented.
-   author unknown
-   updated by chegewara
-
-   https://github.com/nkolban/esp32-snippets/blob/master/Documentation/BLE%20C%2B%2B%20Guide.pdf
-*/
-
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncUDP.h>
-#include "BLE_Device.h"
 #include <NimBLEDevice.h>
 #include <ArduinoJson.h>
 #include <heltec.h>
 
-
+#include "BLE_Device.h"
 #include "secrets.h"    //Define a file called secrets.h and put in your WiFi SSID and Password as #defines. e.g. #define WIFI_SSIS "ROUTER_SSID"
 
 const char* ssid = WIFI_SSID;
