@@ -2,10 +2,10 @@
 
 This code is written for ESP32 Arduino compatible boards and provides a network interface to the SwitchBot BLE devices, e.g. it is a hub.
 
-It is primarily targetted to work with the **Athom Homey** but the interface is based on REST so could be used with any network controller that has code adapted for it.
+It is primarily targetted to work with the **Athom Homey** and the **SwitchBot** app, but the interface is based on REST so could be used with any network controller that has code adapted for it.
 
-When used with Homey, the discovery is completely automatic via UDP Multicast messages.
-Homey can supptort multiple hubs on a LAN so they can be place within range of the BLE device.
+When used with the Homey SwitchBot app (available in the Athom Homey store), the discovery is completely automatic via UDP Multicast messages.
+the Homey app can supptort multiple hubs on a LAN so they can be place within range of the BLE device.
 If two hubs are within range of one BLE device then Homey choses the on that has the best signal strength to send commands.
 
 When adding devices to Homey, the hub provides a list of BLE devices that it has detected so that you can add devices that are not normally within range of Homey.
