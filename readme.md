@@ -15,12 +15,12 @@ The hub constantly scans the BLE frequencies to provide continuous status update
 The 2 boards that I have tested are from Amazon:
 
 * MakerHawk ESP32 Module OLED Display WiFi Development Board WIFI Kit 32 Low Power Consumption 240 MHZ Dual Core with CP2012 Chip 0.96inch Display for Arduino Nodemcu
-by seamuing 
-Learn more: https://www.amazon.co.uk/dp/B076P8GRWV/ref=cm_sw_em_r_mt_dp_EHPV76ACPSF8JHC9J1VA?_encoding=UTF8&psc=1 
+by seamuing
+Learn more: <https://www.amazon.co.uk/dp/B076P8GRWV/ref=cm_sw_em_r_mt_dp_EHPV76ACPSF8JHC9J1VA?_encoding=UTF8&psc=1>
 
 * 3 pack ESP32 ESP-32S Development Board 2.4 GHz Dual Core WLAN WiFi + Bluetooth 2-In-1 Microcontroller ESP-WROOM-32 Chip CP2102 for Arduino
-by AiTrip Eu 
-Learn more: https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAYK05AJWEYVM1HS?_encoding=UTF8&psc=1
+by AiTrip Eu
+Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAYK05AJWEYVM1HS?_encoding=UTF8&psc=1>
 
 ## Installation
 
