@@ -112,12 +112,12 @@ bool BLE_Device::GetSWDevice( uint8_t Index, SWITCHBOT& Device )
     return false;
 }
 
-int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize )
+int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAddress )
 {
     SWITCHBOT Device;
     if (GetSWDevice( Index, Device ))
     {
-        int bytes = snprintf( Buf, BufSize, "{\"address\":\"%s\",\"rssi\":%i,\"serviceData\":", Device.MAC, Device.rssi );
+        int bytes = snprintf( Buf, BufSize, "{\"hubMAC\":\"%s\",\"address\":\"%s\",\"rssi\":%i,\"serviceData\":", macAddress, Device.MAC, Device.rssi );
 
         if (Device.model == 'c')
         {
@@ -147,7 +147,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize )
     return 0;
 }
 
-int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged )
+int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAddress )
 {
     if (OnlyChanged)
     {
@@ -173,7 +173,7 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged )
             BLE_devices[ i ].Changed = false;
         }
 
-        int bytes = DeviceToJson( i, Buf + totaleBytes, BufSize - totaleBytes );
+        int bytes = DeviceToJson( i, Buf + totaleBytes, BufSize - totaleBytes, macAddress );
         if (bytes > 0)
         {
             totaleBytes += bytes;

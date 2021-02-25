@@ -76,8 +76,8 @@ public:
     void UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize );
     bool CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize );
     bool GetSWDevice( uint8_t Index, SWITCHBOT& Device );
-    int DeviceToJson( uint8_t Index, char* Buf, int BufSize );
-    int AllToJson( char* Buf, int BufSize, bool OnlyChanged );
+    int DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAddress );
+    int AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAddress );
     void ClearChanged();
     bool HasChanged();
 };
