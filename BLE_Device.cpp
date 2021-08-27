@@ -62,6 +62,11 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
         return false;
     }
 
+    if ((BLEData[ 0 ] != 'T') && (BLEData[ 0 ] != 'H') && (BLEData[ 0 ] != 'c') && (BLEData[ 0 ] != 's') && (BLEData[ 0 ] != 'd'))
+    {
+        return false;
+    }
+
     int i = FindDevice( MAC );
 
     if (i >= 0)
@@ -104,6 +109,28 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
     // {
     //     return false;
     // }
+
+    if (BLEData[0] == 's')
+    {
+        // Compare the presence sensor differently as there are bytes that change continuosly
+        if ((BLEData[1] != BLE_devices[ Index ].Data[1]) || (BLEData[2] != BLE_devices[ Index ].Data[2]) || (BLEData[5] != BLE_devices[ Index ].Data[5]))
+        {
+            return false;
+        }
+
+        return true;
+    }
+    
+    if (BLEData[0] == 'd')
+    {
+        // Compare the presence sensor differently as there are bytes that change continuosly
+        if ((BLEData[1] != BLE_devices[ Index ].Data[1]) || (BLEData[2] != BLE_devices[ Index ].Data[2]) || (BLEData[3] != BLE_devices[ Index ].Data[3]) || (BLEData[8] != BLE_devices[ Index ].Data[8]))
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     return ( memcmp( BLE_devices[ Index ].Data, BLEData, BLE_devices[ Index ].DataSize ) == 0 );
 }
@@ -160,9 +187,28 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
 
             return bytes;
         }
+
+        if (Device.model == 's')
+        {
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoPresence\",\"motion\":%i,\"battery\":%i,\"light\":%i}}",
+                Device.Presence.motion, Device.Presence.battery, Device.Presence.light );
+
+            return bytes;
+        }
+
+        if (Device.model == 'd')
+        {
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"openTime\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i}}",
+                Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.openTime, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses );
+
+            return bytes;
+        }
+
+        bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"error\": \"Unknown model %c\"}}", Device.model);
+        return bytes;
     }
 
-    return 0;
+    return snprintf( Buf, BufSize, "{\"hubMAC\":\"%s\",\"serviceData\":{\"error\": \"Invalid index %i\"}}", macAddress, Index);
 }
 
 int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAddress )
@@ -199,8 +245,12 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAd
         }
     }
 
-    totaleBytes--;
+    if (totaleBytes < 3)
+    {
+        return 0;
+    }
 
+    totaleBytes--;
     Buf[ totaleBytes++ ] = ']';
     Buf[ totaleBytes ] = 0;
 
@@ -244,6 +294,14 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     else if (Device.Data[ 0 ] == 'c')
     {
         return parseCurtain( Device, SW_Device );
+    }
+    else if (Device.Data[ 0 ] == 's')
+    {
+        return parsePresence( Device, SW_Device );
+    }
+    else if (Device.Data[ 0 ] == 'd')
+    {
+        return parseContac( Device, SW_Device );
     }
 
     return false;
@@ -309,6 +367,58 @@ bool BLE_Device::parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.thermometer.battery = ( byte2 & 0b01111111 );
 
     //    Serial.printf( "Parsed Thermometer: temperature = %0.1f, humidity = %i, battery = %i\n",SW_Device.thermometer.temperature, SW_Device.thermometer.humidity, SW_Device.thermometer.battery );
+
+    return true;
+}
+
+bool BLE_Device::parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+    if (Device.DataSize != 6)
+    {
+        return false;
+    }
+
+    uint8_t byte1 = Device.Data[ 1 ];
+    uint8_t byte2 = Device.Data[ 2 ];
+    uint8_t byte3 = Device.Data[ 3 ];
+    uint8_t byte4 = Device.Data[ 4 ];
+    uint8_t byte5 = Device.Data[ 5 ];
+
+    SW_Device.Presence.light = ((byte5 & 0b00000011) == 2);
+    SW_Device.Presence.motion =  ((byte1 & 0b01000000) == 0b01000000);
+    SW_Device.Presence.battery = ( byte2 & 0b01111111 );
+
+    //Serial.printf( "Parsed Presence: motion = %i, light = %i, battery = %i\n", SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Presence.battery );
+
+    return true;
+}
+
+bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+    if (Device.DataSize != 9)
+    {
+        return false;
+    }
+
+    uint8_t byte1 = Device.Data[ 1 ];
+    uint8_t byte2 = Device.Data[ 2 ];
+    uint8_t byte3 = Device.Data[ 3 ];
+    uint8_t byte4 = Device.Data[ 4 ];
+    uint8_t byte5 = Device.Data[ 5 ];
+    uint8_t byte6 = Device.Data[ 6 ];
+    uint8_t byte7 = Device.Data[ 7 ];
+    uint8_t byte8 = Device.Data[ 8 ];
+
+    SW_Device.Contact.light = ((byte8 & 0b00110000) != 0b00100000);
+    SW_Device.Contact.motion =  ((byte1 & 0b01000000) == 0b01000000);
+    SW_Device.Contact.battery = ( byte2 & 0b01111111 );
+    SW_Device.Contact.contact = (byte3 > 1);
+    SW_Device.Contact.openTime = byte3 - 1;
+    SW_Device.Contact.lastMotion = (byte4 * 256) + byte5;
+    SW_Device.Contact.lastContact = (byte6 * 256) + byte7;
+    SW_Device.Contact.buttonPresses = (byte8 & 0b00001111); // Increments every time button is pressed
+
+    //Serial.printf( "Parsed Presence: motion = %i, light = %i, battery = %i\n", SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Presence.battery );
 
     return true;
 }

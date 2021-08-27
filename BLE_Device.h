@@ -60,6 +60,25 @@ struct SWICHBOT_THERMOMETER
     uint8_t humidity;
 };
 
+struct SWICHBOT_PRESENCE
+{
+    uint8_t battery;
+    uint8_t motion;
+    uint8_t light;
+};
+
+struct SWICHBOT_CONTACT
+{
+    uint8_t battery;
+    uint8_t motion;
+    uint8_t light;
+    uint8_t contact;
+    uint8_t openTime;
+    uint8_t lastMotion;
+    uint8_t lastContact;
+    uint8_t buttonPresses;
+};
+
 typedef struct SWITCHBOT
 {
     char MAC[ 18 ];
@@ -70,6 +89,8 @@ typedef struct SWITCHBOT
         struct SWICHBOT_BOT bot;
         struct SWICHBOT_CUTAIN curtain;
         struct SWICHBOT_THERMOMETER thermometer;
+        struct SWICHBOT_PRESENCE Presence;
+        struct SWICHBOT_CONTACT Contact;
     };
 };
 
@@ -83,6 +104,8 @@ private:
     bool parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+    bool parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+    bool parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 
 public:
 

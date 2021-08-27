@@ -23,7 +23,6 @@
 #include <AsyncUDP.h>
 #include <NimBLEDevice.h>
 #include <ArduinoJson.h>
-#include <heltec.h>
 
 #include "BLE_Device.h"
 #include "secrets.h"    //Define a file called secrets.h and put in your WiFi SSID and Password as #defines. e.g. #define WIFI_SSIS "ROUTER_SSID"
@@ -100,20 +99,19 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
     void onResult( BLEAdvertisedDevice* advertisedDevice )
     {
         // We have found a device, let us now see if it contains the service we are looking for.
-        if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService( serviceUUID ))
+//        if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService( serviceUUID ))
         {
-            BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), (uint8_t*)advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length() );
-
-            if (lookingForBLEAddress[ 0 ] != 0)
+            if (BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), (uint8_t*)advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length() ))
             {
-                Serial.print( "Found BLE device: " );
-                Serial.println( advertisedDevice->getAddress().toString().c_str() );
-                if (strcmp( lookingForBLEAddress, advertisedDevice->getAddress().toString().c_str() ) == 0)
+                if (lookingForBLEAddress[ 0 ] != 0)
                 {
-                    BLEScan* pBLEScan = BLEDevice::getScan();
-                    pBLEScan->stop();
-                }
+                    if (strcmp( lookingForBLEAddress, advertisedDevice->getAddress().toString().c_str() ) == 0)
+                    {
+                        BLEScan* pBLEScan = BLEDevice::getScan();
+                        pBLEScan->stop();
+                    }
 
+                }
             }
         }
     }; // onResult
@@ -123,7 +121,6 @@ void setup()
 {
     pinMode( led, OUTPUT );
     digitalWrite( led, 0 );
-    Heltec.begin( true /*DisplayEnable Enable*/, false /*LoRa Disable*/, true /*Serial Enable*/ );
     Serial.begin( 115200 );
     Serial.println( "Starting Arduino BLE Client application..." );
 
@@ -357,35 +354,6 @@ void loop()
             {
                 SendChangedDevices();
             }
-
-            SWITCHBOT device;
-            uint8_t i = 0;
-
-            // clear the display
-            Heltec.display->clear();
-
-            while (BLE_Devices.GetSWDevice( i++, device ))
-            {
-                if (device.model == 'c')
-                {
-                    sprintf( outstr, "Pos: %i %%", device.curtain.position );
-                    Heltec.display->drawString( 0, 0, outstr );
-                    //                    Serial.println( outstr );
-                }
-                else if (device.model == 'T')
-                {
-                    sprintf( outstr, "Temp: %0.1f °C", device.thermometer.temperature );
-                    Heltec.display->drawString( 0, 20, outstr );
-                    //                    Serial.println( outstr );
-
-                    sprintf( outstr, "Hum: %i %%", device.thermometer.humidity );
-                    Heltec.display->drawString( 0, 40, outstr );
-                    //                    Serial.println( outstr );
-                }
-            }
-
-            // write the buffer to the display
-            Heltec.display->display();
         }
 
         OurCallbacks.Check( millis() ); // Check if any of the registered callbacks have timedout
@@ -430,23 +398,26 @@ void SendChangedDevices()
     // This object changed so send to registered callbacks
     char* deviceBuf = (char*)malloc( 2048 );
     int bytes = BLE_Devices.AllToJson( deviceBuf, 2048, true, macAddress );
-
-    Serial.print( "\nSending: " );
-    Serial.println( deviceBuf );
-
-    char* addresBuf = (char*)malloc( 256 );
-    uint8_t i = 0;
-    while (OurCallbacks.Get( i++, addresBuf, 255 ))
+    if (bytes > 0)
     {
-        if (SendDeviceChange( addresBuf, deviceBuf, bytes ) == -1)
-        {
-            // remove refused connection
-            i--;
-            OurCallbacks.Remove( i );
-        }
-    }
+        Serial.print( "\nSending: " );
+        Serial.println( deviceBuf );
 
-    free( addresBuf );
+        char* addresBuf = (char*)malloc( 256 );
+        uint8_t i = 0;
+        while (OurCallbacks.Get( i++, addresBuf, 255 ))
+        {
+            if (SendDeviceChange( addresBuf, deviceBuf, bytes ) == -1)
+            {
+                // remove refused connection
+                i--;
+                OurCallbacks.Remove( i );
+            }
+        }
+
+        free( addresBuf );
+    }
+    
     free( deviceBuf );
 }
 
