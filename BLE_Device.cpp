@@ -198,8 +198,8 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
 
         if (Device.model == 'd')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"openTime\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i}}",
-                Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.openTime, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i}}",
+                Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.leftOpen, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses );
 
             return bytes;
         }
@@ -409,16 +409,16 @@ bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     uint8_t byte7 = Device.Data[ 7 ];
     uint8_t byte8 = Device.Data[ 8 ];
 
-    SW_Device.Contact.light = ((byte8 & 0b00110000) != 0b00100000);
     SW_Device.Contact.motion =  ((byte1 & 0b01000000) == 0b01000000);
     SW_Device.Contact.battery = ( byte2 & 0b01111111 );
-    SW_Device.Contact.contact = (byte3 > 1);
-    SW_Device.Contact.openTime = byte3 - 1;
+    SW_Device.Contact.light = (byte3 & 0b00000001) == 0b00000001;
+    SW_Device.Contact.contact = ((byte3 & 0b00000110) != 0);
+    SW_Device.Contact.leftOpen = ((byte3 & 0b00000100) != 0);
     SW_Device.Contact.lastMotion = (byte4 * 256) + byte5;
     SW_Device.Contact.lastContact = (byte6 * 256) + byte7;
     SW_Device.Contact.buttonPresses = (byte8 & 0b00001111); // Increments every time button is pressed
 
-    //Serial.printf( "Parsed Presence: motion = %i, light = %i, battery = %i\n", SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Presence.battery );
+    Serial.printf( "Contact: %02x %02x %02x %02x %02x %02x %02x %02x\n", byte1, byte2, byte3, byte4, byte5, byte6, byte7, byte8 );
 
     return true;
 }
@@ -441,18 +441,18 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
 {
     if (( url == nullptr ) || ( *url == 0 ))
     {
-        Serial.println( "Request to add URI failed: URI is not defined" );
+        //Serial.println( "Request to add URI failed: URI is not defined" );
         return false;
     }
 
-    Serial.printf( "Request to add: %s\n", url );
+   // Serial.printf( "Request to add: %s\n", url );
 
     for (uint8_t i = 0; i < NumCallbacks; i++)
     {
         if (strcmp( Callbacks[ i ].url, url ) == 0)
         {
             Callbacks[ i ].activatedTime = t;
-            Serial.println( "Request OK, URI is already registered." );
+//            Serial.println( "Request OK, URI is already registered." );
             return true;
         }
     }
@@ -461,7 +461,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
     strcpy( Callbacks[ NumCallbacks ].url, url );
     NumCallbacks++;
 
-    Serial.println( "Request OK, URI has been added." );
+//    Serial.println( "Request OK, URI has been added." );
 
     return true;
 

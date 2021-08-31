@@ -315,7 +315,7 @@ void setup()
                 // Serial.println();
                 if (strncmp( (char*)packet.data(), "Are you there SwitchBot?", packet.length() ) == 0)
                 {
-                    Serial.println( "Broadcasting logon ASAP" );
+//                    Serial.println( "Broadcasting logon ASAP" );
                     sendBroadcast = millis();
                 }
             } );
@@ -332,7 +332,7 @@ void loop()
         if (millis() >= sendBroadcast)
         {
             //Send multicast
-            Serial.printf( "\n***Broadcasting my details: %s***\n", macAddress );
+//            Serial.printf( "\n***Broadcasting my details: %s***\n", macAddress );
             udp.printf( "SwitchBot BLE Hub! %s", macAddress );
             sendBroadcast = millis() + 60000;
         }
@@ -365,8 +365,8 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 {
     //host = "192.168.1.1" ip or dns
 
-    Serial.print( "Connecting to " );
-    Serial.println( host );
+    // Serial.print( "Connecting to " );
+    // Serial.println( host );
 
     HTTPClient http;
 
@@ -381,7 +381,7 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
     if (httpCode > 0)
     {
         // HTTP header has been send and Server response header has been handled
-        Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
+//        Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
     }
     else
     {
@@ -400,8 +400,8 @@ void SendChangedDevices()
     int bytes = BLE_Devices.AllToJson( deviceBuf, 2048, true, macAddress );
     if (bytes > 0)
     {
-        Serial.print( "\nSending: " );
-        Serial.println( deviceBuf );
+        // Serial.print( "\nSending: " );
+        // Serial.println( deviceBuf );
 
         char* addresBuf = (char*)malloc( 256 );
         uint8_t i = 0;
@@ -453,38 +453,38 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
         while (!complete && ( retries-- > 0 ))
         {
-            Serial.println( "Connecting to device..." );
+//            Serial.println( "Connecting to device..." );
             if (pBLEClient->connect( pDevice ))
             {
                 //success
-                Serial.println( "Device connected" );
+//                Serial.println( "Device connected" );
 
                 BLERemoteService* rs = pBLEClient->getService( serviceUUID );
                 if (rs != nullptr)
                 {
-                    Serial.println( "Got remote service" );
+//                    Serial.println( "Got remote service" );
 
                     BLERemoteCharacteristic* rc = rs->getCharacteristic( charUUID );
                     if (rs != nullptr)
                     {
-                        Serial.println( "Got remote characteristic" );
+//                        Serial.println( "Got remote characteristic" );
 
                         rc->writeValue( BLECommand->Data, BLECommand->DataLen );
-                        Serial.println( "Date sent" );
+//                        Serial.println( "Date sent" );
                         complete = true;
                     }
                     else
                     {
-                        Serial.println( "Failed to get characteristic" );
+//                        Serial.println( "Failed to get characteristic" );
                     }
                 }
                 else
                 {
-                    Serial.println( "Failed to get service" );
+//                    Serial.println( "Failed to get service" );
                 }
 
                 pBLEClient->disconnect();
-                Serial.println( "Disconnected device" );
+//                Serial.println( "Disconnected device" );
             }
             else
             {

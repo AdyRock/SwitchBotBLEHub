@@ -73,7 +73,7 @@ struct SWICHBOT_CONTACT
     uint8_t motion;
     uint8_t light;
     uint8_t contact;
-    uint8_t openTime;
+    uint8_t leftOpen;
     uint8_t lastMotion;
     uint8_t lastContact;
     uint8_t buttonPresses;
