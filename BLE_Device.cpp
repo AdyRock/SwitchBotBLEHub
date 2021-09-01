@@ -198,8 +198,8 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
 
         if (Device.model == 'd')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i}}",
-                Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.leftOpen, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i,\"entryCount\":%i,\"exitCount\":%i}}",
+                Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.leftOpen, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses, Device.Contact.entryCount, Device.Contact.exitCount );
 
             return bytes;
         }
@@ -417,6 +417,8 @@ bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.Contact.lastMotion = (byte4 * 256) + byte5;
     SW_Device.Contact.lastContact = (byte6 * 256) + byte7;
     SW_Device.Contact.buttonPresses = (byte8 & 0b00001111); // Increments every time button is pressed
+    SW_Device.Contact.entryCount = ((byte8 >> 6) & 0b00000011); // Increments every time someone enters
+    SW_Device.Contact.exitCount = ((byte8 >> 4) & 0b00000011); // Increments every time someone exits
 
     Serial.printf( "Contact: %02x %02x %02x %02x %02x %02x %02x %02x\n", byte1, byte2, byte3, byte4, byte5, byte6, byte7, byte8 );
 

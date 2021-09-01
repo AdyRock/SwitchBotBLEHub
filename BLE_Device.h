@@ -77,6 +77,8 @@ struct SWICHBOT_CONTACT
     uint8_t lastMotion;
     uint8_t lastContact;
     uint8_t buttonPresses;
+    uint8_t entryCount;
+    uint8_t exitCount;
 };
 
 typedef struct SWITCHBOT
