@@ -64,6 +64,4 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
 
 10. Build and download the code to the board.
 
-On the Heltec board that has a small display, you should see the first detected curtain position and the first detect temperature devices temperature and humidity. These can obviously be changed in the code.
-
 Once the board is up and running, take it to a location that is withing range of the SwitchBot device(s) and connect it to a USB PSU. It should detect the BLE devices within a few seconds.
