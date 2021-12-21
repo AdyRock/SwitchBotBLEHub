@@ -81,6 +81,13 @@ struct SWICHBOT_CONTACT
     uint8_t exitCount;
 };
 
+struct SWICHBOT_REMOTE
+{
+    uint8_t data1;
+    uint8_t data2;
+    uint8_t data3;
+};
+
 typedef struct SWITCHBOT
 {
     char MAC[ 18 ];
@@ -93,6 +100,7 @@ typedef struct SWITCHBOT
         struct SWICHBOT_THERMOMETER thermometer;
         struct SWICHBOT_PRESENCE Presence;
         struct SWICHBOT_CONTACT Contact;
+        struct SWICHBOT_REMOTE Remote;
     };
 };
 
@@ -108,6 +116,7 @@ private:
     bool parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+    bool parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 
 public:
 

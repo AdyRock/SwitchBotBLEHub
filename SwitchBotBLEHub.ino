@@ -19,22 +19,27 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
-#include <ESPAsyncWebServer.h>
-#include <AsyncUDP.h>
-#include <NimBLEDevice.h>
+#include <ESPAsyncWebServer.h>    // https://github.com/me-no-dev/ESPAsyncWebServer
+#include <ESPAsyncWiFiManager.h>  // https://github.com/alanswx/ESPAsyncWiFiManager
+#include <AsyncUDP.h>             // https://github.com/espressif/arduino-esp32/tree/master/libraries/AsyncUDP
+#include <NimBLEDevice.h>         // https://github.com/h2zero/NimBLE-Arduino/blob/master/docs/New_user_guide.md
 #include <ArduinoJson.h>
+#include <AsyncElegantOTA.h>;     // https://randomnerdtutorials.com/esp32-ota-over-the-air-arduino/
 
 #include "BLE_Device.h"
-#include "secrets.h"    //Define a file called secrets.h and put in your WiFi SSID and Password as #defines. e.g. #define WIFI_SSIS "ROUTER_SSID"
+//#include "secrets.h"    //Define a file called secrets.h and put in your WiFi SSID and Password as #defines. e.g. #define WIFI_SSIS "ROUTER_SSID"
 
-const char* ssid = WIFI_SSID;
-const char* password = WIFI_PASS;
+//const char* ssid = WIFI_SSID;
+//const char* password = WIFI_PASS;
+
+const char* version = "Hello! SwitchBot BLE Hub V1.0";
 
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
 CommandQ BLECommandQ;
 AsyncWebServer server( 80 );
+DNSServer dns;
 AsyncUDP udp;
 
 const int led = 14;
@@ -51,7 +56,7 @@ static BLEUUID    charUUID( "cba20002-224d-11e6-9fb8-0002a5d5c51b" );
 void handleRoot( AsyncWebServerRequest* request )
 {
     digitalWrite( led, 1 );
-    request->send( 200, "text/plain", "hello from SwitchBot BLE Hub!" );
+    request->send( 200, "text/plain", version );
     digitalWrite( led, 0 );
 }
 
@@ -118,24 +123,28 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 }; // MyAdvertisedDeviceCallbacks
 
 void setup()
-{
+{    
     pinMode( led, OUTPUT );
     digitalWrite( led, 0 );
     Serial.begin( 115200 );
     Serial.println( "Starting Arduino BLE Client application..." );
 
-    WiFi.mode( WIFI_STA );
-    WiFi.begin( ssid, password );
+    AsyncWiFiManager wifiManager(&server,&dns);
+//    wifiManager.resetSettings();
+    wifiManager.autoConnect("SwitchBot_ESP32");   
+     
+//    WiFi.mode( WIFI_STA );
+
+//    WiFi.begin( ssid, password );
 
     // Wait for connection
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay( 500 );
-        Serial.print( "." );
-    }
+//    while (WiFi.status() != WL_CONNECTED)
+//    {
+//        delay( 500 );
+//        Serial.print( "." );
+//    }
     Serial.println( "" );
     Serial.print( "Connected to " );
-    Serial.println( ssid );
     Serial.print( "IP address: " );
     Serial.println( WiFi.localIP() );
 
@@ -280,6 +289,7 @@ void setup()
 
     server.onNotFound( handleNotFound );
 
+    AsyncElegantOTA.begin(&server);
     server.begin();
     Serial.println( "HTTP server started" );
 
@@ -315,7 +325,7 @@ void setup()
                 // Serial.println();
                 if (strncmp( (char*)packet.data(), "Are you there SwitchBot?", packet.length() ) == 0)
                 {
-//                    Serial.println( "Broadcasting logon ASAP" );
+                    Serial.println( "Received: Are you there SwitchBot?" );
                     sendBroadcast = millis();
                 }
             } );
@@ -332,7 +342,7 @@ void loop()
         if (millis() >= sendBroadcast)
         {
             //Send multicast
-//            Serial.printf( "\n***Broadcasting my details: %s***\n", macAddress );
+            Serial.printf( "\n***Broadcasting my details: %s***\n", macAddress );
             udp.printf( "SwitchBot BLE Hub! %s", macAddress );
             sendBroadcast = millis() + 60000;
         }
