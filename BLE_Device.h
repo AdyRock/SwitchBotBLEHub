@@ -25,6 +25,7 @@
 typedef struct BLE_COMMAND
 {
     char Address[ 18 ];
+    char ReplyTo[ 50 ];
     uint8_t Data[ 20 ];
     int8_t DataLen;
 };
@@ -32,7 +33,7 @@ typedef struct BLE_DEVICE
 {
     char MAC[ 18 ];
     int rssi;
-    uint8_t Data[ 10 ];
+    uint8_t Data[ 21 ];
     uint8_t DataSize;
     bool	Changed;
 };
@@ -88,6 +89,14 @@ struct SWICHBOT_REMOTE
     uint8_t data3;
 };
 
+struct SWICHBOT_BULB
+{
+    uint8_t sequence;
+    uint8_t on_off;
+    uint8_t dim;
+    uint8_t lightState;
+};
+
 typedef struct SWITCHBOT
 {
     char MAC[ 18 ];
@@ -101,6 +110,7 @@ typedef struct SWITCHBOT
         struct SWICHBOT_PRESENCE Presence;
         struct SWICHBOT_CONTACT Contact;
         struct SWICHBOT_REMOTE Remote;
+        struct SWICHBOT_BULB Bulb;
     };
 };
 
@@ -117,6 +127,7 @@ private:
     bool parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+    bool parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 
 public:
 
@@ -124,9 +135,9 @@ public:
     ~BLE_Device();
 
     int FindDevice( const char* MAC );
-    bool AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t BLEDataSize );
-    void UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize );
-    bool CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize );
+    bool AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize );
+    void UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize );
+    bool CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize );
     bool GetSWDevice( uint8_t Index, SWITCHBOT& Device );
     int DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAddress );
     int AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAddress );
@@ -151,6 +162,7 @@ public:
     ~ClientCallbacks();
 
     bool Add( const char* url, unsigned long t );
+    bool Find( const char* url, char* full_url, int bufSize );
     bool Remove( uint8_t Index );
     bool Remove( const char* url );
     bool Get( uint8_t Index, char* buf, int BufLength );
@@ -171,7 +183,7 @@ public:
     CommandQ();
     ~CommandQ();
 
-    bool Push( String Address, String Data );
+    bool Push( String Address, String Data, String ReplyTo );
     bool Pop( BLE_COMMAND* pBLE_Command );
 };
 

@@ -24,7 +24,7 @@
 #include <AsyncUDP.h>             // https://github.com/espressif/arduino-esp32/tree/master/libraries/AsyncUDP
 #include <NimBLEDevice.h>         // https://github.com/h2zero/NimBLE-Arduino/blob/master/docs/New_user_guide.md
 #include <ArduinoJson.h>
-#include <AsyncElegantOTA.h>;     // https://randomnerdtutorials.com/esp32-ota-over-the-air-arduino/
+#include <AsyncElegantOTA.h>      // https://randomnerdtutorials.com/esp32-ota-over-the-air-arduino/
 
 #include "BLE_Device.h"
 //#include "secrets.h"    //Define a file called secrets.h and put in your WiFi SSID and Password as #defines. e.g. #define WIFI_SSIS "ROUTER_SSID"
@@ -47,11 +47,15 @@ const int led = 14;
 char macAddress[ 18 ];
 unsigned long sendBroadcast = 0;
 char lookingForBLEAddress[ 18 ];
+uint8_t BLENotifyData[ 50 ];
+int BLENotifyLength = 0;
 
 // The remote service we wish to connect to.
 static BLEUUID serviceUUID( "cba20d00-224d-11e6-9fb8-0002a5d5c51b" );
 // The characteristic of the remote service we are interested in.
 static BLEUUID    charUUID( "cba20002-224d-11e6-9fb8-0002a5d5c51b" );
+// The characteristic of the notification service we are interested in.
+static BLEUUID    notifyUUID( "cba20003-224d-11e6-9fb8-0002a5d5c51b" );
 
 void handleRoot( AsyncWebServerRequest* request )
 {
@@ -79,18 +83,24 @@ void handleNotFound( AsyncWebServerRequest* request )
     digitalWrite( led, 0 );
 }
 
-static void notifyCallback(
+void notifyCallback(
     BLERemoteCharacteristic* pBLERemoteCharacteristic,
     uint8_t* pData,
     size_t length,
     bool isNotify )
 {
-    Serial.print( "Notify callback for characteristic " );
-    Serial.print( pBLERemoteCharacteristic->getUUID().toString().c_str() );
-    Serial.print( " of data length " );
-    Serial.println( (unsigned long)length );
-    Serial.print( "data: " );
-    Serial.println( (char*)pData );
+    // Serial.print( "Notify callback for characteristic " );
+    // Serial.print( pBLERemoteCharacteristic->getUUID().toString().c_str() );
+    // Serial.print( " of data length " );
+    // Serial.println( (unsigned long)length );
+
+    if (length > 50)
+    {
+        length = 50;
+    }
+
+    memcpy( BLENotifyData, pData, length );
+    BLENotifyLength = length;
 }
 
 /**
@@ -106,7 +116,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
         // We have found a device, let us now see if it contains the service we are looking for.
 //        if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService( serviceUUID ))
         {
-            if (BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), (uint8_t*)advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length() ))
+            if (BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), (uint8_t*)advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length(), (uint8_t*)advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length() ))
             {
                 if (lookingForBLEAddress[ 0 ] != 0)
                 {
@@ -133,16 +143,6 @@ void setup()
 //    wifiManager.resetSettings();
     wifiManager.autoConnect("SwitchBot_ESP32");   
      
-//    WiFi.mode( WIFI_STA );
-
-//    WiFi.begin( ssid, password );
-
-    // Wait for connection
-//    while (WiFi.status() != WL_CONNECTED)
-//    {
-//        delay( 500 );
-//        Serial.print( "." );
-//    }
     Serial.println( "" );
     Serial.print( "Connected to " );
     Serial.print( "IP address: " );
@@ -223,9 +223,10 @@ void setup()
                         if (deviceIdx >= 0)
                         {
                             String dataToWrite = writeParameters[ "data" ];
-                            Serial.printf( "Received request to write device %s with %s (%i)\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length() );
+                            String sourcIP = request->client()->remoteIP().toString();
+                            // Serial.printf( "Received request to write device %s with %s (%i) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length(), sourcIP.c_str() );
 
-                            if (BLECommandQ.Push( clientAddress, dataToWrite ))
+                            if (BLECommandQ.Push( clientAddress, dataToWrite, sourcIP ))
                             {
                                 request->send( 200, "text/plain", "OK" );
                             }
@@ -373,7 +374,7 @@ void loop()
 
 int SendDeviceChange( const char* host, const char* data, int bytes )
 {
-    //host = "192.168.1.1" ip or dns
+    //host = "192.168.1.1", ip or dns
 
     // Serial.print( "Connecting to " );
     // Serial.println( host );
@@ -437,8 +438,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
     pBLEScan->stop();
 
     BLEAddress bleAddress( BLECommand->Address );
-    Serial.print( "Looking for BLE device: " );
-    Serial.println( BLECommand->Address );
+    Serial.printf( "Sending command to BLE device: %s\n", BLECommand->Address );
 
     // Register the device we are looking for so the scan stop as soon as it is found
     strcpy( lookingForBLEAddress, BLECommand->Address );
@@ -463,38 +463,97 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
         while (!complete && ( retries-- > 0 ))
         {
-//            Serial.println( "Connecting to device..." );
+            // Serial.println( "Connecting to device..." );
             if (pBLEClient->connect( pDevice ))
             {
                 //success
-//                Serial.println( "Device connected" );
+                // Serial.println( "Device connected" );
 
                 BLERemoteService* rs = pBLEClient->getService( serviceUUID );
                 if (rs != nullptr)
                 {
-//                    Serial.println( "Got remote service" );
+                    // Serial.println( "Got remote service" );
 
                     BLERemoteCharacteristic* rc = rs->getCharacteristic( charUUID );
                     if (rs != nullptr)
                     {
-//                        Serial.println( "Got remote characteristic" );
+                        // Serial.println( "Got remote characteristic" );
+
+                        // Get the notifcation characteristic
+                        BLERemoteCharacteristic* rn = nullptr;
+                        if ( (BLECommand->Data[ 0 ] == 87) && (BLECommand->Data[ 1 ] == 15) && (BLECommand->Data[ 2 ] == 72) && (BLECommand->Data[ 3 ] == 1))
+                        {
+                            // This request requires data to be return via the notification
+                            // Serial.println( "Getting notification characteristic" );
+                            rn = rs->getCharacteristic( notifyUUID );
+                            
+                            if (rn)
+                            {
+                                // Serial.println( "Registering notification" );
+                                BLENotifyLength = 0;
+                                if (!rn->subscribe( true, notifyCallback ))
+                                {
+                                    Serial.println( "Registering notification FAILED!" );
+                                }
+                            }
+                        }
 
                         rc->writeValue( BLECommand->Data, BLECommand->DataLen );
-//                        Serial.println( "Date sent" );
+                        // Serial.println( "Data sent" );
+                        if (rn)
+                        {
+                            // Serial.println( "Waiting for notification" );
+                            unsigned long endTime = millis() + 2000;
+                            while ((BLENotifyLength == 0) && (millis() < endTime));
+                            if (BLENotifyLength > 0)
+                            {
+                                // Serial.println( "Got notification" );
+
+                                // Return data
+                                char* replyBuf = (char*)malloc( 300 );
+                                int bytes = snprintf( replyBuf, 300, "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"u\",\"modelName\":\"WoBulb\"},\"replyData\":[",
+                                    macAddress, BLECommand->Address );
+                                
+                                // Convert raw data to JsonArray
+                                for (int i = 0; i < BLENotifyLength; i++)
+                                {
+                                    bytes += snprintf( replyBuf + bytes, 300 - bytes, "%i,", BLENotifyData[i]);
+                                }
+
+                                bytes--;
+                                bytes += snprintf( replyBuf + bytes, 300 - bytes, "]}]");
+
+                                char* replyAddress = (char*)malloc( 300 );
+                                if (OurCallbacks.Find( BLECommand->ReplyTo, replyAddress, 300 ))
+                                {
+                                    // Serial.printf( "Sending to %s: %s\n", replyAddress, replyBuf );
+                                    SendDeviceChange( replyAddress, replyBuf, bytes );
+                                }
+                                else
+                                {
+                                    Serial.printf( "Callback URL %s not found\n", BLECommand->ReplyTo );
+                                }
+
+                                free( replyAddress );
+                                free( replyBuf );
+                            }
+
+                            rn->unsubscribe();
+                        }
                         complete = true;
                     }
                     else
                     {
-//                        Serial.println( "Failed to get characteristic" );
+                        Serial.println( "Failed to get characteristic" );
                     }
                 }
                 else
                 {
-//                    Serial.println( "Failed to get service" );
+                    Serial.println( "Failed to get service" );
                 }
 
                 pBLEClient->disconnect();
-//                Serial.println( "Disconnected device" );
+                // Serial.println( "Disconnected device" );
             }
             else
             {

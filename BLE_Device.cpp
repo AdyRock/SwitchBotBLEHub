@@ -26,8 +26,8 @@ BLE_Device::BLE_Device()
     NumDevices = 0;
     Changed = false;
 
-    memset( BLE_devices, 0, sizeof( BLE_devices ) );
-    Serial.println( "BLE Device Class initialised" );
+    memset( BLE_devices, 0, sizeof( BLE_DEVICE ) * 50 );
+    // Serial.println( "BLE Device Class initialised" );
 }
 
 BLE_Device::~BLE_Device()
@@ -55,14 +55,25 @@ int BLE_Device::FindDevice( const char* MAC )
     return -1;
 }
 
-bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t BLEDataSize )
+bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if (( NumDevices >= 50 ) || ( BLEDataSize < 3 ) || ( BLEDataSize > sizeof( BLE_devices[ NumDevices ].Data ) ))
+    if (BLEData[ 0 ] == 'u')
     {
-        return false;
+        if ( (ManufactureDataSize != 13) ||  (ManufactureData[ 1 ] != 9) || (ManufactureData[ 0 ] != 0x69))
+        {
+            Serial.printf( "Invalid bulb data: size = %i, id1 = %i, id2 = %i\n", ManufactureDataSize, ManufactureData[ 1 ], (ManufactureData[ 0 ] ));
+            return false;
+        }
+    }
+    else
+    {
+        if (( BLEDataSize < 3 ) || ( BLEDataSize > sizeof( BLE_devices[ NumDevices ].Data ) ))
+        {
+            return false;
+        }
     }
 
-    if ((BLEData[ 0 ] != 'i') && (BLEData[ 0 ] != 'T') && (BLEData[ 0 ] != 'H') && (BLEData[ 0 ] != 'c') && (BLEData[ 0 ] != 's') && (BLEData[ 0 ] != 'd') && (BLEData[ 0 ] != 'b'))
+    if ((BLEData[ 0 ] != 'i') && (BLEData[ 0 ] != 'T') && (BLEData[ 0 ] != 'H') && (BLEData[ 0 ] != 'c') && (BLEData[ 0 ] != 's') && (BLEData[ 0 ] != 'd') && (BLEData[ 0 ] != 'b') && (BLEData[ 0 ] != 'u'))
     {
         return false;
     }
@@ -72,43 +83,68 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
     if (i >= 0)
     {
         // Device already in the array so just update it
-        if (CompareDevice( i, rssi, BLEData, BLEDataSize ))
+        if (CompareDevice( i, rssi, BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ))
         {
             // They are the same
-//            Serial.printf( "Matched %s\n", MAC );
+            // Serial.printf( "Matched %s\n", MAC );
             return true;
         }
 
         // Update the existing device
-        UpdateDevice( i, rssi, BLEData, BLEDataSize );
+        UpdateDevice( i, rssi, BLEData, BLEDataSize, ManufactureData, ManufactureDataSize );
         return true;
     }
 
-    //    Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
+    if ( NumDevices >= 50 )
+    {
+        return false;
+    }
+
+    // Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
 
     strcpy( BLE_devices[ NumDevices ].MAC, MAC );
-    memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
-    BLE_devices[ NumDevices ].DataSize = BLEDataSize;
+    if (BLEData[ 0 ] == 'u')
+    {
+        // use manufacture data
+        memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+        BLE_devices[ NumDevices ].Data[ 0 ] = 'u';
+        BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+    }
+    else
+    {
+        memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
+        BLE_devices[ NumDevices ].DataSize = BLEDataSize;
+    }
+
     BLE_devices[ NumDevices ].Changed = true;
     BLE_devices[ NumDevices ].rssi = rssi;
+
+    // Serial.printf("Added %s @ %i = %c\n",  BLE_devices[ NumDevices ].MAC, NumDevices, BLEData[ 0 ] );
+
     Changed = true;
     NumDevices++;
+
 
     return true;
 }
 
 // Return true if the device data is the same
-bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize )
+bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if (BLEDataSize != BLE_devices[ Index ].DataSize)
+    if (BLEData[0] == 'u')
     {
-        return false;
+        if (ManufactureDataSize != BLE_devices[ Index ].DataSize - 1)
+        {
+            return false;
+        }
     }
-
-    // if ((BLE_devices[ Index ].rssi < (rssi - 5)) || (BLE_devices[ Index ].rssi > (rssi + 5)))
-    // {
-    //     return false;
-    // }
+    else
+    {
+        if (BLEDataSize != BLE_devices[ Index ].DataSize)
+        {
+            return false;
+        }
+    }
 
     if (BLEData[0] == 's')
     {
@@ -131,19 +167,43 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
 
         return true;
     }
+    
+    if (BLEData[0] == 'u')
+    {
+        // Compare the bulb sensor differently as it uses manufacture data
+        // Serial.printf( "Compare Bulb: Data[8] = %i, Data[9] = %i, Data[10] = %i\n", ManufactureData[ 8 ], ManufactureData[ 9 ], ManufactureData[ 10 ]);
+        if ((ManufactureData[ 8 ] != BLE_devices[ Index ].Data[ 9 ]) || (ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ]) || (ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ]))
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     return ( memcmp( BLE_devices[ Index ].Data, BLEData, BLE_devices[ Index ].DataSize ) == 0 );
 }
 
-void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize )
+void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    memcpy( BLE_devices[ Index ].Data, BLEData, BLE_devices[ Index ].DataSize );
-    BLE_devices[ Index ].DataSize = BLEDataSize;
+    if ((BLEData[ 0 ] == 'u') && (ManufactureData[ 1 ] == 9) && (ManufactureData[ 0 ] == 0x69))
+    {
+        if (ManufactureDataSize > 20)
+        {
+            ManufactureDataSize = 20;
+        }
+        memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
+        BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
+    }
+    else
+    {
+        memcpy( BLE_devices[ Index ].Data, BLEData, BLEDataSize );
+        BLE_devices[ Index ].DataSize = BLEDataSize;
+    }
     BLE_devices[ Index ].Changed = true;
     BLE_devices[ Index ].rssi = rssi;
     Changed = true;
 
-    //    Serial.printf("Updated %s @ %i\n",  BLE_devices[ Index ].MAC, Index );
+    // Serial.printf("Updated %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
 }
 
 // Returns false if Index is beyond the last entry
@@ -166,48 +226,56 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
 
         if (Device.model == 'c')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"c\",\"modelName\":\"WoCurtain\",\"calibration\":%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
-                ( Device.curtain.calibration ? "true" : "false" ), Device.curtain.battery, Device.curtain.position, Device.curtain.lightLevel );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoCurtain\",\"calibration\":%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
+                Device.model, ( Device.curtain.calibration ? "true" : "false" ), Device.curtain.battery, Device.curtain.position, Device.curtain.lightLevel );
 
             return bytes;
         }
 
         if (Device.model == 'H')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"H\",\"modelName\":\"WoHand\",\"mode\":%s,\"battery\":%i,\"state\":%i}}",
-                ( Device.bot.mode ? "true" : "false" ), Device.bot.battery, Device.bot.state );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoHand\",\"mode\":%s,\"battery\":%i,\"state\":%i}}",
+                Device.model, ( Device.bot.mode ? "true" : "false" ), Device.bot.battery, Device.bot.state );
 
             return bytes;
         }
 
         if ((Device.model == 'T') || (Device.model == 'i'))
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"T\",\"modelName\":\"WoSensorTH\",\"temperature\":{\"c\": %0.1f},\"battery\":%i,\"humidity\":%i}}",
-                Device.thermometer.temperature, Device.thermometer.battery, Device.thermometer.humidity );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoSensorTH\",\"temperature\":{\"c\": %0.1f},\"battery\":%i,\"humidity\":%i}}",
+                Device.model, Device.thermometer.temperature, Device.thermometer.battery, Device.thermometer.humidity );
 
             return bytes;
         }
 
         if (Device.model == 's')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoPresence\",\"motion\":%i,\"battery\":%i,\"light\":%i}}",
-                Device.Presence.motion, Device.Presence.battery, Device.Presence.light );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoPresence\",\"motion\":%i,\"battery\":%i,\"light\":%i}}",
+                Device.model, Device.Presence.motion, Device.Presence.battery, Device.Presence.light );
 
             return bytes;
         }
 
         if (Device.model == 'd')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i,\"entryCount\":%i,\"exitCount\":%i}}",
-                Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.leftOpen, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses, Device.Contact.entryCount, Device.Contact.exitCount );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i,\"entryCount\":%i,\"exitCount\":%i}}",
+                Device.model, Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.leftOpen, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses, Device.Contact.entryCount, Device.Contact.exitCount );
 
             return bytes;
         }
 
         if (Device.model == 'b')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"P\",\"modelName\":\"WoRemote\",\"data1\":%i,\"data2\":%i,\"data3\":%i}}",
-                Device.Remote.data1, Device.Remote.data2, Device.Remote.data3 );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoRemote\",\"data1\":%i,\"data2\":%i,\"data3\":%i}}",
+                Device.model, Device.Remote.data1, Device.Remote.data2, Device.Remote.data3 );
+
+            return bytes;
+        }
+
+        if (Device.model == 'u')
+        {
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoBulb\",\"sequence\":%i,\"on_off\":%i,\"dim\":%i,\"lightState\":%i}}",
+                Device.model, Device.Bulb.sequence, Device.Bulb.on_off, Device.Bulb.dim, Device.Bulb.lightState );
 
             return bytes;
         }
@@ -221,6 +289,15 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
 
 int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAddress )
 {
+    static boolean inAllToJson = false;
+
+    while (inAllToJson)
+    {
+        
+    };
+
+    inAllToJson = true;
+
     if (OnlyChanged)
     {
         Changed = false;
@@ -255,6 +332,7 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAd
 
     if (totaleBytes < 3)
     {
+        inAllToJson = false;
         return 0;
     }
 
@@ -262,6 +340,9 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAd
     Buf[ totaleBytes++ ] = ']';
     Buf[ totaleBytes ] = 0;
 
+    // Serial.println( Buf );
+
+    inAllToJson = false;
     return totaleBytes;
 }
 
@@ -315,6 +396,10 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     {
         return parseRemote( Device, SW_Device );
     }
+    else if (Device.Data[ 0 ] == 'u')
+    {
+        return parseBulb( Device, SW_Device );
+    }
 
     return false;
 }
@@ -333,7 +418,7 @@ bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.bot.state = ( ( byte1 & 0b01000000 ) != 0 ); // Whether the switch status is ON or OFF
     SW_Device.bot.battery = byte2 & 0b01111111; // %
 
-    Serial.printf( "Bot: state = %i, battery = %i\n", SW_Device.bot.state, SW_Device.bot.battery );
+    // Serial.printf( "Bot: MAC = %s, state = %i, battery = %i\n", Device.MAC, SW_Device.bot.state, SW_Device.bot.battery );
     return true;
 }
 
@@ -355,7 +440,7 @@ bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.curtain.moving = ( byte3 & 0b10000000 ) != 0 ? true : false;
     SW_Device.curtain.lightLevel = ( byte4 >> 4 ) & 0b00001111; // light sensor level (1-10)
 
-    Serial.printf( "Curtain: position = %i, battery = %i\n", SW_Device.curtain.position, SW_Device.curtain.battery );
+    // Serial.printf( "Curtain: MAC = %s, position = %i, battery = %i\n", Device.MAC, SW_Device.curtain.position, SW_Device.curtain.battery );
 
     return true;
 }
@@ -378,7 +463,7 @@ bool BLE_Device::parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.thermometer.humidity = ( byte5 & 0b01111111 );
     SW_Device.thermometer.battery = ( byte2 & 0b01111111 );
 
-    Serial.printf( "Thermometer: temperature = %0.1f, humidity = %i, battery = %i\n",SW_Device.thermometer.temperature, SW_Device.thermometer.humidity, SW_Device.thermometer.battery );
+    // Serial.printf( "Thermometer: MAC = %s, temperature = %0.1f, humidity = %i, battery = %i\n", Device.MAC, SW_Device.thermometer.temperature, SW_Device.thermometer.humidity, SW_Device.thermometer.battery );
 
     return true;
 }
@@ -400,7 +485,7 @@ bool BLE_Device::parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.Presence.motion =  ((byte1 & 0b01000000) == 0b01000000);
     SW_Device.Presence.battery = ( byte2 & 0b01111111 );
 
-    Serial.printf( "Presence: motion = %i, light = %i, battery = %i\n", SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Presence.battery );
+    // Serial.printf( "Presence: MAC = %s, motion = %i, light = %i, battery = %i\n", Device.MAC, SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Presence.battery );
 
     return true;
 }
@@ -432,8 +517,7 @@ bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.Contact.entryCount = ((byte8 >> 6) & 0b00000011); // Increments every time someone enters
     SW_Device.Contact.exitCount = ((byte8 >> 4) & 0b00000011); // Increments every time someone exits
 
-    //Serial.printf( "Contact: %02x %02x %02x %02x %02x %02x %02x %02x\n", byte1, byte2, byte3, byte4, byte5, byte6, byte7, byte8 );
-    Serial.printf( "Contact: contact = %i, motion = %i, light = %i, left open = %i, button presses = %i, entry count = %i, exit count = %i, battery = %i\n", SW_Device.Contact.contact, SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Contact.leftOpen, SW_Device.Contact.buttonPresses, SW_Device.Contact.entryCount, SW_Device.Contact.exitCount, SW_Device.Presence.battery );
+    // Serial.printf( "Contact: MAC = %s, contact = %i, motion = %i, light = %i, left open = %i, button presses = %i, entry count = %i, exit count = %i, battery = %i\n", Device.MAC, SW_Device.Contact.contact, SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Contact.leftOpen, SW_Device.Contact.buttonPresses, SW_Device.Contact.entryCount, SW_Device.Contact.exitCount, SW_Device.Presence.battery );
     
     return true;
 }
@@ -453,7 +537,28 @@ bool BLE_Device::parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.Remote.data2 = byte2;
     SW_Device.Remote.data3 = byte3;
 
-    Serial.printf( "Remote: %02x %02x %02x\n", byte1, byte2, byte3 );
+    // Serial.printf( "Remote: MAC = %s, %02x %02x %02x\n", Device.MAC, byte1, byte2, byte3 );
+
+    return true;
+}
+
+bool BLE_Device::parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+    if (Device.DataSize != 14)
+    {
+        return false;
+    }
+
+    uint8_t byte8 = Device.Data[ 9 ];
+    uint8_t byte9 = Device.Data[ 10 ];
+    uint8_t byte10 = Device.Data[ 11 ];
+
+    SW_Device.Bulb.sequence = byte8;
+    SW_Device.Bulb.on_off = ((byte9 & 0x80) == 0x80);
+    SW_Device.Bulb.dim = (byte9 & 0x7F);
+    SW_Device.Bulb.lightState = (byte10 & 0x03);
+
+    // Serial.printf( "Bulb: MAC = %s, Sequence = %i, On_Off = %i, Dim = %i, LightState = %i\n", Device.MAC, SW_Device.Bulb.sequence,  SW_Device.Bulb.on_off, SW_Device.Bulb.dim, SW_Device.Bulb.lightState );
 
     return true;
 }
@@ -487,7 +592,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
         if (strcmp( Callbacks[ i ].url, url ) == 0)
         {
             Callbacks[ i ].activatedTime = t;
-//            Serial.println( "Request OK, URI is already registered." );
+            // Serial.println( "Request OK, URI is already registered." );
             return true;
         }
     }
@@ -496,10 +601,29 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
     strcpy( Callbacks[ NumCallbacks ].url, url );
     NumCallbacks++;
 
-//    Serial.println( "Request OK, URI has been added." );
+    // Serial.printf( "Request OK, URI %s has been added.\n", url );
 
     return true;
 
+}
+
+bool ClientCallbacks::Find( const char* base_url, char* full_url, int bufSize )
+{
+    if (( base_url == nullptr ) || ( *base_url == 0 ))
+    {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < NumCallbacks; i++)
+    {
+        if (strstr( Callbacks[ i ].url, base_url ) != nullptr)
+        {
+            strncpy( full_url, Callbacks[ i ].url, bufSize );
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool ClientCallbacks::Get( uint8_t Index, char* buf, int BufLength )
@@ -572,7 +696,7 @@ CommandQ::~CommandQ()
 
 }
 
-bool CommandQ::Push( String Address, String Data )
+bool CommandQ::Push( String Address, String Data, String ReplyTo )
 {
     if (NumQd < QSize)
     {
@@ -585,24 +709,25 @@ bool CommandQ::Push( String Address, String Data )
             QEntry = 0;
         }
 
-        strcpy( entry->Address, Address.c_str() );
+        strncpy( entry->Address, Address.c_str(), 18 );
+        strncpy( entry->ReplyTo, ReplyTo.c_str(), 50 );
 
         uint8_t* buf = entry->Data;
         char* endPtr = (char*)Data.c_str();
 
-        Serial.printf( "Converting string %s to buffer: ", endPtr );
+        // Serial.printf( "Converting string %s to buffer: ", endPtr );
 
         int bytes = 0;
         do
         {
             endPtr++;
             buf[ bytes ] = strtol( endPtr, &endPtr, 10 );
-            Serial.printf( "%i, ", buf[ bytes ] );
+            // Serial.printf( "%i, ", buf[ bytes ] );
             bytes++;
         }
         while (( endPtr != nullptr ) && ( *endPtr != 0 ) && ( bytes < 10 ));
 
-        Serial.printf( "bytes = %i\n", bytes );
+        // Serial.printf( "bytes = %i\n", bytes );
         entry->DataLen = bytes;
 
         return true;

@@ -28,22 +28,21 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
 2. In the Arduino IDE you need to set the following links in Fie - Preferences - Additional Boards Maneger URLs:
 
     ```html
-    https://resource.heltec.cn/download/package_heltec_esp32_index.json
     https://dl.espressif.com/dl/package_esp32_index.json
     http://arduino.esp8266.com/stable/package_esp8266com_index.json
     https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
     https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_dev_index.json
+
     ```
 
 3. In the Tools - Boards manager select the esp32 by Espressif Systems v 1.0.4
-4. Then select the board type as ESP32 Arduino - Heltek Wifi Kit 32.
-5. Next, change the To0ls - Partion Scheme to Huge App. This allows the programs size to fit on the board.
+4. Then select the board type as ESP32 Arduino - ESP 32 Dev Module.
+5. Next, change the Tools - Partion Scheme to Minimal SPIFFS (1.9MB App with OTA/190KB SPIFFS ). This allows the programs size to fit on the board plus leave room for the bootloader.
 6. You will need to install the following libraries into your system from the Sketch - Include Library menu:
 
     ```html
     ArduinoJson by Benoit Blanchon version 0.1.2
     NimBLE-Arduino by h2zero version 1.2.0
-    Heltec ESP32 Dev-Boards by Heltec Automation version 1.1.0
     ```
 
 7. Install the follwing packages from the internet:
@@ -51,17 +50,25 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
    ```html
     AsyncTCP from https://github.com/me-no-dev/AsyncTCP
     ESPAsyncWebServer from https://github.com/me-no-dev/ESPAsyncWebServer
+    https://github.com/ayushsharma82/AsyncElegantOTA
+    https://github.com/alanswx/ESPAsyncWiFiManager
    ```
 
-8. Finally create file called secrets.h and add lines to define your WiFi SSID and password:
+8. Connect the board to you computer via USB and select the Port on the Tools menu.
 
-   ```c
-    #define WIFI_SSID "Your WiFi SSID here"
-    #define WIFI_PASS "Your WiFi Password here"
-   ```
+9. Build and download the code to the board.
 
-9. Connect the board to you computer via USB and select the Port on the Tools menu.
+10. If the device hasn't ben connected to your WiFi already then connect to the SwitchBot_ESP32 Access Point.
 
-10. Build and download the code to the board.
+11. If you don't get a join network pop-up then use a browser to open any web page (it should redirect) or connect to 192.168.4.1.
+
+12. Choose one of the detected access points and enter the password, then click save.
+
+13. The hub will try to connect to your WiFi and then start working. If the connection fails, reconnect to the AP and reconfigure.
 
 Once the board is up and running, take it to a location that is withing range of the SwitchBot device(s) and connect it to a USB PSU. It should detect the BLE devices within a few seconds.
+
+The board also supports Over The Air updates so future updates can be sent directly to the board.
+Open a browser on a computer connected to the same network as the board. Navigate to http://board_ip_address/update
+
+Select the Firmware option and then choose the SwitchBotBLEHub.ino.esp32.bin file. The file download should start straight away.
