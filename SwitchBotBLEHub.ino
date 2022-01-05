@@ -32,7 +32,7 @@
 //const char* ssid = WIFI_SSID;
 //const char* password = WIFI_PASS;
 
-const char* version = "Hello! SwitchBot BLE Hub V1.0";
+const char* version = "Hello! SwitchBot BLE Hub V1.1";
 
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
