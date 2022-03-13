@@ -424,7 +424,7 @@ bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 5)
+    if (Device.DataSize < 5)
     {
         return false;
     }
