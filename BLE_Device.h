@@ -54,6 +54,11 @@ struct SWICHBOT_CUTAIN
     bool moving;
 };
 
+struct SWICHBOT_BLIND
+{
+    uint8_t battery;
+};
+
 struct SWICHBOT_THERMOMETER
 {
     uint8_t battery;
@@ -111,6 +116,7 @@ typedef struct SWITCHBOT
         struct SWICHBOT_CONTACT Contact;
         struct SWICHBOT_REMOTE Remote;
         struct SWICHBOT_BULB Bulb;
+        struct SWICHBOT_BLIND blind;
     };
 };
 
@@ -123,12 +129,14 @@ private:
     bool parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+    bool parseBlind( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
-
+    bool parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+    
 public:
 
     BLE_Device();

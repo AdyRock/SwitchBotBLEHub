@@ -262,8 +262,8 @@ void setup()
             digitalWrite( led, 1 );
 
             Serial.println( "Received request for devices" );
-            char* buf = (char*)malloc( 2048 );
-            BLE_Devices.AllToJson( buf, 2048, false, macAddress );
+            char* buf = (char*)malloc( 4096 );
+            BLE_Devices.AllToJson( buf, 4096, false, macAddress );
             Serial.println( buf );
             request->send( 200, "application/json", buf );
             free( buf );
@@ -376,8 +376,8 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 {
     //host = "192.168.1.1", ip or dns
 
-    // Serial.print( "Connecting to " );
-    // Serial.println( host );
+     Serial.print( "Connecting to " );
+     Serial.println( host );
 
     HTTPClient http;
 
@@ -392,7 +392,7 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
     if (httpCode > 0)
     {
         // HTTP header has been send and Server response header has been handled
-//        Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
+        Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
     }
     else
     {
@@ -467,21 +467,22 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
             if (pBLEClient->connect( pDevice ))
             {
                 //success
-                // Serial.println( "Device connected" );
+                 Serial.println( "Device connected" );
 
                 BLERemoteService* rs = pBLEClient->getService( serviceUUID );
                 if (rs != nullptr)
                 {
-                    // Serial.println( "Got remote service" );
+                     Serial.println( "Got remote service" );
 
                     BLERemoteCharacteristic* rc = rs->getCharacteristic( charUUID );
                     if (rs != nullptr)
                     {
-                        // Serial.println( "Got remote characteristic" );
+                         Serial.println( "Got remote characteristic" );
 
                         // Get the notifcation characteristic
                         BLERemoteCharacteristic* rn = nullptr;
-                        if ( (BLECommand->Data[ 0 ] == 87) && (BLECommand->Data[ 1 ] == 15) && (BLECommand->Data[ 2 ] == 72) && (BLECommand->Data[ 3 ] == 1))
+                        if ( ((BLECommand->Data[ 0 ] == 87) && (BLECommand->Data[ 1 ] == 15) && (BLECommand->Data[ 2 ] == 72) && (BLECommand->Data[ 3 ] == 1)) ||
+                             (BLECommand->Data[ 0 ] == 87) && (BLECommand->Data[ 1 ] == 2))
                         {
                             // This request requires data to be return via the notification
                             // Serial.println( "Getting notification characteristic" );
@@ -499,42 +500,71 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
                         }
 
                         rc->writeValue( BLECommand->Data, BLECommand->DataLen );
-                        // Serial.println( "Data sent" );
+                        Serial.println( "Data sent" );
+                        
                         if (rn)
                         {
-                            // Serial.println( "Waiting for notification" );
+                            Serial.println( "Waiting for notification" );
                             unsigned long endTime = millis() + 2000;
                             while ((BLENotifyLength == 0) && (millis() < endTime));
                             if (BLENotifyLength > 0)
                             {
-                                // Serial.println( "Got notification" );
+                                Serial.println( "Got notification" );
 
                                 // Return data
                                 char* replyBuf = (char*)malloc( 300 );
-                                int bytes = snprintf( replyBuf, 300, "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"u\",\"modelName\":\"WoBulb\"},\"replyData\":[",
-                                    macAddress, BLECommand->Address );
-                                
-                                // Convert raw data to JsonArray
-                                for (int i = 0; i < BLENotifyLength; i++)
+    
+                                int idx = BLE_Devices.FindDevice( BLECommand->Address );
+                                SWITCHBOT Device;
+                                if (BLE_Devices.GetSWDevice( idx, Device ))
                                 {
-                                    bytes += snprintf( replyBuf + bytes, 300 - bytes, "%i,", BLENotifyData[i]);
-                                }
+                                    int bytes = 0;
 
-                                bytes--;
-                                bytes += snprintf( replyBuf + bytes, 300 - bytes, "]}]");
-
-                                char* replyAddress = (char*)malloc( 300 );
-                                if (OurCallbacks.Find( BLECommand->ReplyTo, replyAddress, 300 ))
-                                {
-                                    // Serial.printf( "Sending to %s: %s\n", replyAddress, replyBuf );
-                                    SendDeviceChange( replyAddress, replyBuf, bytes );
+                                    if (Device.model == 'u')
+                                    {
+                                        bytes = snprintf( replyBuf, 300, "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"u\",\"modelName\":\"WoBulb\"},\"replyData\":[",
+                                            macAddress, BLECommand->Address );
+                                    }
+                                    else if (Device.model == 'x')                                  
+                                    {
+                                        bytes = snprintf( replyBuf, 300, "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"x\",\"modelName\":\"WoBlindTilt\"},\"replyData\":[",
+                                            macAddress, BLECommand->Address );
+                                    }
+                                    
+                                    if (bytes > 0)
+                                    {
+                                        // Convert raw data to JsonArray
+                                        for (int i = 0; i < BLENotifyLength; i++)
+                                        {
+                                            bytes += snprintf( replyBuf + bytes, 300 - bytes, "%i,", BLENotifyData[i]);
+                                        }
+        
+                                        bytes--;
+                                        bytes += snprintf( replyBuf + bytes, 300 - bytes, "]}]");
+        
+                                        char* replyAddress = (char*)malloc( 300 );
+                                        if (OurCallbacks.Find( BLECommand->ReplyTo, replyAddress, 300 ))
+                                        {
+                                            // Serial.printf( "Sending to %s: %s\n", replyAddress, replyBuf );
+                                            SendDeviceChange( replyAddress, replyBuf, bytes );
+                                        }
+                                        else
+                                        {
+                                            Serial.printf( "Callback URL %s not found\n", BLECommand->ReplyTo );
+                                        }
+    
+                                        free( replyAddress );
+                                    }
+                                      else
+                                      {
+                                          Serial.printf( "Don't undersatnd for for model %c\n", Device.model );
+                                      }
                                 }
                                 else
                                 {
                                     Serial.printf( "Callback URL %s not found\n", BLECommand->ReplyTo );
                                 }
-
-                                free( replyAddress );
+                                
                                 free( replyBuf );
                             }
 
@@ -553,7 +583,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
                 }
 
                 pBLEClient->disconnect();
-                // Serial.println( "Disconnected device" );
+                 Serial.println( "Disconnected device" );
             }
             else
             {
