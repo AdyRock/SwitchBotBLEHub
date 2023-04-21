@@ -57,6 +57,8 @@ struct SWICHBOT_CUTAIN
 struct SWICHBOT_BLIND
 {
     uint8_t battery;
+    uint8_t position;
+    uint8_t version;
 };
 
 struct SWICHBOT_THERMOMETER

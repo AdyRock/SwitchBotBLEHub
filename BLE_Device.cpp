@@ -86,7 +86,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
         if (CompareDevice( i, rssi, BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ))
         {
             // They are the same
-            // Serial.printf( "Matched %s\n", MAC );
+//            Serial.printf( "Matched %s\n", MAC );
             return true;
         }
 
@@ -100,7 +100,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
         return false;
     }
 
-    // Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
+    Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
 
     strcpy( BLE_devices[ NumDevices ].MAC, MAC );
     if (BLEData[ 0 ] == 'u')
@@ -139,10 +139,11 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
 // Return true if the device data is the same
 bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if ((BLEData[0] == 'u') || (BLEData[0] == 'w'))
+    if ((BLEData[0] == 'u') || (BLEData[0] == 'w') || (BLEData[0] == 'x'))
     {
         if (ManufactureDataSize != BLE_devices[ Index ].DataSize - 1)
         {
+//            Serial.printf("Compare MF Data Size different %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
             return false;
         }
     }
@@ -150,6 +151,7 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
     {
         if (BLEDataSize != BLE_devices[ Index ].DataSize)
         {
+//            Serial.printf("Compare AD Data Size different %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
             return false;
         }
     }
@@ -179,7 +181,6 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
     if (BLEData[0] == 'u')
     {
         // Compare the bulb sensor differently as it uses manufacture data
-        // Serial.printf( "Compare Bulb: Data[8] = %i, Data[9] = %i, Data[10] = %i\n", ManufactureData[ 8 ], ManufactureData[ 9 ], ManufactureData[ 10 ]);
         if ((ManufactureData[ 8 ] != BLE_devices[ Index ].Data[ 9 ]) || (ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ]) || (ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ]))
         {
             return false;
@@ -191,11 +192,24 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
     if (BLEData[0] == 'w')
     {
         // Compare the IO TH sensor differently as it uses manufacture data
-        // Serial.printf( "Compare IO TH: Data[10] = %i, Data[11] = %i, Data[12] = %i\n", ManufactureData[ 10 ], ManufactureData[ 11 ], ManufactureData[ 12 ]);
         if ((BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ]) || (ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ]) || (ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ]) || (ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ]))
         {
             return false;
         }
+
+        return true;
+    }
+    
+    if (BLEData[0] == 'x')
+    {
+        // Compare the blind / tilt differently as it uses manufacture data
+        if ((BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ]) || (ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ]))
+        {
+            Serial.printf("Compare Blind Tilt false: %i to %i and %i to %i\n", BLEData[ 2 ], BLE_devices[ Index ].Data[ 2 ], ManufactureData[ 10 ], BLE_devices[ Index ].Data[ 11 ] );
+            return false;
+        }
+
+//        Serial.printf("Compare Blind Tilt true: %i to %i and %i to %i\n", BLEData[ 2 ], BLE_devices[ Index ].Data[ 2 ], ManufactureData[ 8 ], BLE_devices[ Index ].Data[ 9 ] );
 
         return true;
     }
@@ -214,7 +228,17 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_
         memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
         BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
     }
-    if ((BLEData[ 0 ] == 'w') && (ManufactureData[ 1 ] == 9) && (ManufactureData[ 0 ] == 0x69))
+    else if ((BLEData[ 0 ] == 'w') && (ManufactureData[ 1 ] == 9) && (ManufactureData[ 0 ] == 0x69))
+    {
+        if (ManufactureDataSize > 20)
+        {
+            ManufactureDataSize = 20;
+        }
+        memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
+        BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
+        BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
+    }
+    else if ((BLEData[ 0 ] == 'x') )
     {
         if (ManufactureDataSize > 20)
         {
@@ -233,7 +257,7 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_
     BLE_devices[ Index ].rssi = rssi;
     Changed = true;
 
-    // Serial.printf("Updated %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
+    Serial.printf("Updated %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
 }
 
 // Returns false if Index is beyond the last entry
@@ -264,8 +288,8 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
 
         if (Device.model == 'x')
         {
-            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\",\"battery\":%i}}",
-                Device.model, ( Device.curtain.calibration ? "true" : "false" ), Device.curtain.battery );
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\",\"battery\":%i,\"position\":%i,\"version\":%i}}",
+                Device.model, Device.blind.battery, Device.blind.position, Device.blind.version );
 
             return bytes;
         }
@@ -501,15 +525,24 @@ bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseBlind( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 3)
+    if (Device.DataSize < 3)
     {
         return false;
     }
-
+    
     uint8_t byte2 = Device.Data[ 2 ];
-
     SW_Device.blind.battery = ( byte2 & 0b01111111 ); // %
 
+    if (Device.DataSize >= 11)
+    {
+        uint8_t byte11 = Device.Data[ 11 ];
+        SW_Device.blind.position = ( byte11 & 0b01111111 ); // current position %
+        SW_Device.blind.version = 2;
+    }
+    else
+    {
+        SW_Device.blind.version = 1;
+    }
     // Serial.printf( "Blind: MAC = %s, battery = %i\n", Device.MAC, SW_Device.blind.battery );
 
     return true;
