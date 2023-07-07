@@ -562,7 +562,7 @@ bool BLE_Device::parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     uint8_t byte12 = Device.Data[ 13 ];
 
     uint8_t temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
-    SW_Device.thermometer.temperature = temp_sign * ( ( byte11 & 0b01111111 ) + ( (float)byte10 / 10 ) );
+    SW_Device.thermometer.temperature = temp_sign * ( ( byte11 & 0b01111111 ) + ( (float)(byte10 & 0b01111111) / 10 ) );
 
     SW_Device.thermometer.humidity = ( byte12 & 0b01111111 );
     SW_Device.thermometer.battery = ( byte2 & 0b01111111 );

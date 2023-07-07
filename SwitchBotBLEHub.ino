@@ -27,13 +27,10 @@
 #include <AsyncElegantOTA.h>      // https://randomnerdtutorials.com/esp32-ota-over-the-air-arduino/
 
 #include "BLE_Device.h"
-//#include "secrets.h"    //Define a file called secrets.h and put in your WiFi SSID and Password as #defines. e.g. #define WIFI_SSIS "ROUTER_SSID"
-
-//const char* ssid = WIFI_SSID;
-//const char* password = WIFI_PASS;
 
 const char* version = "Hello! SwitchBot BLE Hub V1.2";
 
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 1.3</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -60,7 +57,7 @@ static BLEUUID    notifyUUID( "cba20003-224d-11e6-9fb8-0002a5d5c51b" );
 void handleRoot( AsyncWebServerRequest* request )
 {
     digitalWrite( led, 1 );
-    request->send( 200, "text/plain", version );
+    request->send( 200, "text/html", HTML );
     digitalWrite( led, 0 );
 }
 
@@ -479,7 +476,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
                     {
                          Serial.println( "Got remote characteristic" );
 
-                        // Get the notifcation characteristic
+                        // Get the notification characteristic
                         BLERemoteCharacteristic* rn = nullptr;
                         if ( ((BLECommand->Data[ 0 ] == 87) && (BLECommand->Data[ 1 ] == 15) && (BLECommand->Data[ 2 ] == 72) && (BLECommand->Data[ 3 ] == 1)) ||
                              (BLECommand->Data[ 0 ] == 87) && (BLECommand->Data[ 1 ] == 2))
@@ -557,7 +554,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
                                     }
                                       else
                                       {
-                                          Serial.printf( "Don't undersatnd for for model %c\n", Device.model );
+                                          Serial.printf( "Don't understand for for model %c\n", Device.model );
                                       }
                                 }
                                 else
