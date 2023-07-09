@@ -21,6 +21,139 @@
 #include <stdio.h>
 #include "Arduino.h"
 
+#define BULB_DATA_SIZE 14
+#define BULB_DATA_ID 'u'
+
+#define IOTH_DATA_SIZE 15
+#define IOTH_DATA_ID 'w'
+
+#define BLIND_DATASIZE 12
+#define BLIND_DATASIZE2 14
+#define BLIND_DATA_ID 'x'
+
+#define TH_I_DATA_SIZE 6
+#define TH_I_DATA_ID 'i'
+
+#define TH_T_DATA_SIZE 6
+#define TH_T_DATA_ID 'T'
+
+#define BOT_DATA_SIZE 3
+#define BOT_DATA_ID 'H'
+
+#define CURTAIN_DATA_SIZE 6
+#define CURTAIN_DATA_ID 'c'
+
+#define PRESENCE_DATA_SIZE 6
+#define PRESENCE_DATA_ID 's'
+
+#define CONTACT_DATA_SIZE 9
+#define CONTACT_DATA_ID 'd'
+
+#define REMOTE_DATA_SIZE 4
+#define REMOTE_DATA_ID 'b'
+
+bool ValidateData( uint8_t Type, uint16_t BLEDataSize, uint16_t ManufactureDataSize )
+{
+    if (( Type != TH_I_DATA_ID ) &&
+        ( Type != TH_T_DATA_ID ) &&
+        ( Type != BOT_DATA_ID ) &&
+        ( Type != CURTAIN_DATA_ID ) &&
+        ( Type != PRESENCE_DATA_ID ) &&
+        ( Type != CONTACT_DATA_ID ) &&
+        ( Type != REMOTE_DATA_ID ) &&
+        ( Type != BULB_DATA_ID ) &&
+        ( Type != BLIND_DATA_ID ) &&
+        ( Type != IOTH_DATA_ID ))
+    {
+        return false;
+    }
+
+    if (Type == BULB_DATA_ID)
+    {
+        if (ManufactureDataSize == BULB_DATA_SIZE - 1)
+        {
+            return true;
+        }
+    }
+    else if (Type == IOTH_DATA_ID)
+    {
+        if (ManufactureDataSize == IOTH_DATA_SIZE - 1)
+        {
+            return true;
+        }
+    }
+    else if (Type == BLIND_DATA_ID)
+    {
+        if (( ManufactureDataSize == BLIND_DATASIZE - 1 ) || ( ManufactureDataSize == BLIND_DATASIZE2 - 1 ))
+        {
+            return true;
+        }
+    }
+    else
+    {
+        if (( Type == TH_I_DATA_ID ) && ( BLEDataSize == TH_I_DATA_SIZE ))
+        {
+            return true;
+        }
+        else if (( Type == TH_T_DATA_ID ) && ( BLEDataSize == TH_T_DATA_SIZE ))
+        {
+            return true;
+        }
+        else if (( Type == BOT_DATA_ID ) && ( BLEDataSize == BOT_DATA_SIZE ))
+        {
+            return true;
+        }
+        else if (( Type == CURTAIN_DATA_ID ) && ( BLEDataSize == CURTAIN_DATA_SIZE ))
+        {
+            return true;
+        }
+        else if (( Type == PRESENCE_DATA_ID ) && ( BLEDataSize == PRESENCE_DATA_SIZE ))
+        {
+            return true;
+        }
+        else if (( Type == CONTACT_DATA_ID ) && ( BLEDataSize == CONTACT_DATA_SIZE ))
+        {
+            return true;
+        }
+        else if (( Type == REMOTE_DATA_ID ) && ( BLEDataSize == REMOTE_DATA_SIZE ))
+        {
+            return true;
+        }
+
+        Serial.printf( "Invalid %c BLE data: size = %i\n", Type, BLEDataSize );
+        return false;
+    }
+
+    Serial.printf( "Invalid %c Manufacture data: size = %i\n", Type, ManufactureDataSize );
+    return false;
+}
+
+bool strcmpnc( const char* s1, const char* s2 )
+{
+    while (*s1 && *s2)
+    {
+        if (tolower( *s1 ) != tolower( *s2 ))
+        {
+            return false;
+        }
+
+        s1++;
+        s2++;
+    }
+
+    return true;
+}
+
+void printHex( uint8_t* data, uint8_t len )
+{
+    for (uint8_t i = 0; i < len; i++)
+    {
+        Serial.printf( "%02X ", data[ i ] );
+    }
+
+    Serial.println();
+}
+
 BLE_Device::BLE_Device()
 {
     NumDevices = 0;
@@ -44,7 +177,7 @@ int BLE_Device::FindDevice( const char* MAC )
 {
     for (uint8_t i = 0; i < NumDevices; i++)
     {
-        if (strcmp( BLE_devices[ i ].MAC, MAC ) == 0)
+        if (strcmpnc( BLE_devices[ i ].MAC, MAC ) == true)
         {
             // Serial.printf( "Found %s @ %i\n", MAC, i );
 
@@ -57,24 +190,9 @@ int BLE_Device::FindDevice( const char* MAC )
 
 bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if (BLEData[ 0 ] == 'u')
+    if (!ValidateData( BLEData[ 0 ], BLEDataSize, ManufactureDataSize ))
     {
-        if ( (ManufactureDataSize != 13) ||  (ManufactureData[ 1 ] != 9) || (ManufactureData[ 0 ] != 0x69))
-        {
-            Serial.printf( "Invalid bulb data: size = %i, id1 = %i, id2 = %i\n", ManufactureDataSize, ManufactureData[ 1 ], (ManufactureData[ 0 ] ));
-            return false;
-        }
-    }
-    else
-    {
-        if (( BLEDataSize < 3 ) || ( BLEDataSize > sizeof( BLE_devices[ NumDevices ].Data ) ))
-        {
-            return false;
-        }
-    }
-
-    if ((BLEData[ 0 ] != 'i') && (BLEData[ 0 ] != 'T') && (BLEData[ 0 ] != 'H') && (BLEData[ 0 ] != 'c') && (BLEData[ 0 ] != 's') && (BLEData[ 0 ] != 'd') && (BLEData[ 0 ] != 'b') && (BLEData[ 0 ] != 'u') && (BLEData[ 0 ] != 'x') && (BLEData[ 0 ] != 'w'))
-    {
+        // Wrong type or wrong data size
         return false;
     }
 
@@ -95,7 +213,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
         return true;
     }
 
-    if ( NumDevices >= 50 )
+    if (NumDevices >= 50)
     {
         return false;
     }
@@ -103,18 +221,18 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
     Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
 
     strcpy( BLE_devices[ NumDevices ].MAC, MAC );
-    if (BLEData[ 0 ] == 'u')
+    if (BLEData[ 0 ] == BULB_DATA_ID)
     {
         // use manufacture data
         memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-        BLE_devices[ NumDevices ].Data[ 0 ] = 'u';
+        BLE_devices[ NumDevices ].Data[ 0 ] = BULB_DATA_ID;
         BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
     }
-    else if (BLEData[ 0 ] == 'w')
+    else if (BLEData[ 0 ] == IOTH_DATA_ID)
     {
         // use manufacture data
         memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-        BLE_devices[ NumDevices ].Data[ 0 ] = 'w';
+        BLE_devices[ NumDevices ].Data[ 0 ] = IOTH_DATA_ID;
         BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
         BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
     }
@@ -132,18 +250,17 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
     Changed = true;
     NumDevices++;
 
-
     return true;
 }
 
 // Return true if the device data is the same
 bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if ((BLEData[0] == 'u') || (BLEData[0] == 'w') || (BLEData[0] == 'x'))
+    if (( BLEData[ 0 ] == BULB_DATA_ID ) || ( BLEData[ 0 ] == IOTH_DATA_ID ) || ( BLEData[ 0 ] == BLIND_DATA_ID ))
     {
         if (ManufactureDataSize != BLE_devices[ Index ].DataSize - 1)
         {
-//            Serial.printf("Compare MF Data Size different %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
+            //            Serial.printf("Compare MF Data Size different %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
             return false;
         }
     }
@@ -151,65 +268,65 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
     {
         if (BLEDataSize != BLE_devices[ Index ].DataSize)
         {
-//            Serial.printf("Compare AD Data Size different %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
+            //            Serial.printf("Compare AD Data Size different %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
             return false;
         }
     }
 
-    if (BLEData[0] == 's')
+    if (BLEData[ 0 ] == PRESENCE_DATA_ID)
     {
         // Compare the presence sensor differently as there are bytes that change continuosly
-        if ((BLEData[1] != BLE_devices[ Index ].Data[1]) || (BLEData[2] != BLE_devices[ Index ].Data[2]) || (BLEData[5] != BLE_devices[ Index ].Data[5]))
+        if (( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ) || ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) || ( BLEData[ 5 ] != BLE_devices[ Index ].Data[ 5 ] ))
         {
             return false;
         }
 
         return true;
     }
-    
-    if (BLEData[0] == 'd')
+
+    if (BLEData[ 0 ] == CONTACT_DATA_ID)
     {
         // Compare the contact sensor differently as there are bytes that change continuosly
-        if ((BLEData[1] != BLE_devices[ Index ].Data[1]) || (BLEData[2] != BLE_devices[ Index ].Data[2]) || (BLEData[3] != BLE_devices[ Index ].Data[3]) || (BLEData[8] != BLE_devices[ Index ].Data[8]))
+        if (( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ) || ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) || ( BLEData[ 3 ] != BLE_devices[ Index ].Data[ 3 ] ) || ( BLEData[ 8 ] != BLE_devices[ Index ].Data[ 8 ] ))
         {
             return false;
         }
 
         return true;
     }
-    
-    if (BLEData[0] == 'u')
+
+    if (BLEData[ 0 ] == BULB_DATA_ID)
     {
         // Compare the bulb sensor differently as it uses manufacture data
-        if ((ManufactureData[ 8 ] != BLE_devices[ Index ].Data[ 9 ]) || (ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ]) || (ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ]))
+        if (( ManufactureData[ 8 ] != BLE_devices[ Index ].Data[ 9 ] ) || ( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ] ) || ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ))
         {
             return false;
         }
 
         return true;
     }
-    
-    if (BLEData[0] == 'w')
+
+    if (BLEData[ 0 ] == IOTH_DATA_ID)
     {
         // Compare the IO TH sensor differently as it uses manufacture data
-        if ((BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ]) || (ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ]) || (ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ]) || (ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ]))
+        if (( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) || ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) || ( ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ] ) || ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ))
         {
             return false;
         }
 
         return true;
     }
-    
-    if (BLEData[0] == 'x')
+
+    if (BLEData[ 0 ] == BLIND_DATA_ID)
     {
         // Compare the blind / tilt differently as it uses manufacture data
-        if ((BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ]) || (ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ]))
+        if (( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) || ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ))
         {
-            Serial.printf("Compare Blind Tilt false: %i to %i and %i to %i\n", BLEData[ 2 ], BLE_devices[ Index ].Data[ 2 ], ManufactureData[ 10 ], BLE_devices[ Index ].Data[ 11 ] );
+            Serial.printf( "Compare Blind Tilt false: %i to %i and %i to %i\n", BLEData[ 2 ], BLE_devices[ Index ].Data[ 2 ], ManufactureData[ 10 ], BLE_devices[ Index ].Data[ 11 ] );
             return false;
         }
 
-//        Serial.printf("Compare Blind Tilt true: %i to %i and %i to %i\n", BLEData[ 2 ], BLE_devices[ Index ].Data[ 2 ], ManufactureData[ 8 ], BLE_devices[ Index ].Data[ 9 ] );
+        //        Serial.printf("Compare Blind Tilt true: %i to %i and %i to %i\n", BLEData[ 2 ], BLE_devices[ Index ].Data[ 2 ], ManufactureData[ 8 ], BLE_devices[ Index ].Data[ 9 ] );
 
         return true;
     }
@@ -219,31 +336,25 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
 
 void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if ((BLEData[ 0 ] == 'u') && (ManufactureData[ 1 ] == 9) && (ManufactureData[ 0 ] == 0x69))
+    if (!ValidateData( BLEData[ 0 ], BLEDataSize, ManufactureDataSize ))
     {
-        if (ManufactureDataSize > 20)
-        {
-            ManufactureDataSize = 20;
-        }
-        memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
-        BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
+        return;
     }
-    else if ((BLEData[ 0 ] == 'w') && (ManufactureData[ 1 ] == 9) && (ManufactureData[ 0 ] == 0x69))
+
+    if (BLEData[ 0 ] == BULB_DATA_ID)
     {
-        if (ManufactureDataSize > 20)
-        {
-            ManufactureDataSize = 20;
-        }
         memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
         BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
         BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
     }
-    else if ((BLEData[ 0 ] == 'x') )
+    else if (BLEData[ 0 ] == IOTH_DATA_ID)
     {
-        if (ManufactureDataSize > 20)
-        {
-            ManufactureDataSize = 20;
-        }
+        memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
+        BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
+        BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
+    }
+    else if (BLEData[ 0 ] == BLIND_DATA_ID)
+    {
         memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
         BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
         BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
@@ -253,11 +364,13 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_
         memcpy( BLE_devices[ Index ].Data, BLEData, BLEDataSize );
         BLE_devices[ Index ].DataSize = BLEDataSize;
     }
+
     BLE_devices[ Index ].Changed = true;
     BLE_devices[ Index ].rssi = rssi;
     Changed = true;
 
-    Serial.printf("Updated %s @ %i = %c\n",  BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
+    Serial.printf( "Updated %s @ %i = %c\n", BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
+    printHex( BLE_devices[ Index ].Data, BLE_devices[ Index ].DataSize );
 }
 
 // Returns false if Index is beyond the last entry
@@ -265,7 +378,10 @@ bool BLE_Device::GetSWDevice( uint8_t Index, SWITCHBOT& Device )
 {
     if (Index < NumDevices)
     {
-        parseDevice( BLE_devices[ Index ], Device );
+        if (!parseDevice( BLE_devices[ Index ], Device ))
+        {
+            Serial.printf( "Failed to parse device %i\n", Index );
+        }
         return true;
     }
     return false;
@@ -278,7 +394,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
     {
         int bytes = snprintf( Buf, BufSize, "{\"hubMAC\":\"%s\",\"address\":\"%s\",\"rssi\":%i,\"serviceData\":", macAddress, Device.MAC, Device.rssi );
 
-        if (Device.model == 'c')
+        if (Device.model == CURTAIN_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoCurtain\",\"calibration\":%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
                 Device.model, ( Device.curtain.calibration ? "true" : "false" ), Device.curtain.battery, Device.curtain.position, Device.curtain.lightLevel );
@@ -286,7 +402,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if (Device.model == 'x')
+        if (Device.model == BLIND_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\",\"battery\":%i,\"position\":%i,\"version\":%i}}",
                 Device.model, Device.blind.battery, Device.blind.position, Device.blind.version );
@@ -294,7 +410,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if (Device.model == 'H')
+        if (Device.model == BOT_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoHand\",\"mode\":%s,\"battery\":%i,\"state\":%i}}",
                 Device.model, ( Device.bot.mode ? "true" : "false" ), Device.bot.battery, Device.bot.state );
@@ -302,7 +418,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if ((Device.model == 'T') || (Device.model == 'i'))
+        if (( Device.model == TH_I_DATA_ID ) || ( Device.model == TH_T_DATA_ID ))
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoSensorTH\",\"temperature\":{\"c\": %0.1f},\"battery\":%i,\"humidity\":%i}}",
                 Device.model, Device.thermometer.temperature, Device.thermometer.battery, Device.thermometer.humidity );
@@ -310,7 +426,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if (Device.model == 's')
+        if (Device.model == PRESENCE_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoPresence\",\"motion\":%i,\"battery\":%i,\"light\":%i}}",
                 Device.model, Device.Presence.motion, Device.Presence.battery, Device.Presence.light );
@@ -318,7 +434,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if (Device.model == 'd')
+        if (Device.model == CONTACT_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoContact\",\"motion\":%i,\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i,\"entryCount\":%i,\"exitCount\":%i}}",
                 Device.model, Device.Contact.motion, Device.Contact.battery, Device.Contact.light, Device.Contact.contact, Device.Contact.leftOpen, Device.Contact.lastMotion, Device.Contact.lastContact, Device.Contact.buttonPresses, Device.Contact.entryCount, Device.Contact.exitCount );
@@ -326,7 +442,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if (Device.model == 'b')
+        if (Device.model == REMOTE_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoRemote\",\"data1\":%i,\"data2\":%i,\"data3\":%i}}",
                 Device.model, Device.Remote.data1, Device.Remote.data2, Device.Remote.data3 );
@@ -334,7 +450,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if (Device.model == 'u')
+        if (Device.model == BULB_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoBulb\",\"sequence\":%i,\"on_off\":%i,\"dim\":%i,\"lightState\":%i}}",
                 Device.model, Device.Bulb.sequence, Device.Bulb.on_off, Device.Bulb.dim, Device.Bulb.lightState );
@@ -342,7 +458,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        if (Device.model == 'w')
+        if (Device.model == IOTH_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoIOSensor\",\"temperature\":{\"c\": %0.1f},\"battery\":%i,\"humidity\":%i}}",
                 Device.model, Device.thermometer.temperature, Device.thermometer.battery, Device.thermometer.humidity );
@@ -350,11 +466,11 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
-        bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"error\": \"Unknown model %c\"}}", Device.model);
+        bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"error\": \"Unknown model %c\"}}", Device.model );
         return bytes;
     }
 
-    return snprintf( Buf, BufSize, "{\"hubMAC\":\"%s\",\"serviceData\":{\"error\": \"Invalid index %i\"}}", macAddress, Index);
+    return snprintf( Buf, BufSize, "{\"hubMAC\":\"%s\",\"serviceData\":{\"error\": \"Invalid index %i\"}}", macAddress, Index );
 }
 
 int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAddress )
@@ -363,7 +479,7 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAd
 
     while (inAllToJson)
     {
-        
+
     };
 
     inAllToJson = true;
@@ -435,6 +551,7 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
     if (Device.DataSize < 3)
     {
+        Serial.println( "Failed to parse device: Datasize < 3");
         return false;
     }
 
@@ -442,49 +559,50 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     strcpy( SW_Device.MAC, Device.MAC );
     SW_Device.rssi = Device.rssi;
 
-    if ((Device.Data[ 0 ] == 'T') || (Device.Data[ 0 ] == 'i'))
+    if (( Device.Data[ 0 ] == TH_I_DATA_ID ) || ( Device.Data[ 0 ] == TH_T_DATA_ID ))
     {
         return parseThermometer( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 'H')
+    else if (Device.Data[ 0 ] == BOT_DATA_ID)
     {
         return parseBot( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 'c')
+    else if (Device.Data[ 0 ] == CURTAIN_DATA_ID)
     {
         return parseCurtain( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 's')
+    else if (Device.Data[ 0 ] == PRESENCE_DATA_ID)
     {
         return parsePresence( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 'd')
+    else if (Device.Data[ 0 ] == CONTACT_DATA_ID)
     {
         return parseContac( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 'b')
+    else if (Device.Data[ 0 ] == REMOTE_DATA_ID)
     {
         return parseRemote( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 'u')
+    else if (Device.Data[ 0 ] == BULB_DATA_ID)
     {
         return parseBulb( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 'w')
+    else if (Device.Data[ 0 ] == IOTH_DATA_ID)
     {
         return parseIOTH( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == 'x')
+    else if (Device.Data[ 0 ] == BLIND_DATA_ID)
     {
         return parseBlind( Device, SW_Device );
     }
 
+    Serial.println( "Failed to parse device: Unrecognised device type");
     return false;
 }
 
 bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 3)
+    if (Device.DataSize != BOT_DATA_SIZE)
     {
         return false;
     }
@@ -502,7 +620,7 @@ bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize < 5)
+    if (Device.DataSize != CURTAIN_DATA_SIZE)
     {
         return false;
     }
@@ -525,15 +643,16 @@ bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseBlind( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize < 3)
+    if (( Device.DataSize != BLIND_DATASIZE ) && ( Device.DataSize != BLIND_DATASIZE2 ))
     {
+        Serial.printf( "Failed to parse Blind: MAC = %s, data size = %i\n", Device.MAC, Device.DataSize );
         return false;
     }
-    
+
     uint8_t byte2 = Device.Data[ 2 ];
     SW_Device.blind.battery = ( byte2 & 0b01111111 ); // %
 
-    if (Device.DataSize >= 11)
+    if (Device.DataSize == BLIND_DATASIZE2)
     {
         uint8_t byte11 = Device.Data[ 11 ];
         SW_Device.blind.position = ( byte11 & 0b01111111 ); // current position %
@@ -541,7 +660,9 @@ bool BLE_Device::parseBlind( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     }
     else
     {
-        SW_Device.blind.version = 1;
+        uint8_t byte11 = Device.Data[ 9 ];
+        SW_Device.blind.position = ( byte11 & 0b01111111 ); // current position %
+        SW_Device.blind.version = 2;
     }
     // Serial.printf( "Blind: MAC = %s, battery = %i\n", Device.MAC, SW_Device.blind.battery );
 
@@ -551,7 +672,7 @@ bool BLE_Device::parseBlind( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 13)
+    if (Device.DataSize != 15)
     {
         return false;
     }
@@ -561,8 +682,10 @@ bool BLE_Device::parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     uint8_t byte11 = Device.Data[ 12 ];
     uint8_t byte12 = Device.Data[ 13 ];
 
-    uint8_t temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
-    SW_Device.thermometer.temperature = temp_sign * ( ( byte11 & 0b01111111 ) + ( (float)(byte10 & 0b01111111) / 10 ) );
+    float temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
+    SW_Device.thermometer.temperature = temp_sign * ( (float)( byte11 & 0b01111111 ) + ( (float)( byte10 & 0b01111111 ) / 10 ) );
+
+    //    Serial.printf("W temp = %f, %f, %f, %f\n", temp_sign, (float)(byte11 & 0b01111111), ((float)(byte10 & 0b01111111) / 10), SW_Device.thermometer.temperature);
 
     SW_Device.thermometer.humidity = ( byte12 & 0b01111111 );
     SW_Device.thermometer.battery = ( byte2 & 0b01111111 );
@@ -574,7 +697,7 @@ bool BLE_Device::parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 6)
+    if (Device.DataSize != TH_I_DATA_SIZE)
     {
         return false;
     }
@@ -597,7 +720,7 @@ bool BLE_Device::parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 6)
+    if (Device.DataSize != PRESENCE_DATA_SIZE)
     {
         return false;
     }
@@ -608,8 +731,8 @@ bool BLE_Device::parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     uint8_t byte4 = Device.Data[ 4 ];
     uint8_t byte5 = Device.Data[ 5 ];
 
-    SW_Device.Presence.light = ((byte5 & 0b00000011) == 2);
-    SW_Device.Presence.motion =  ((byte1 & 0b01000000) == 0b01000000);
+    SW_Device.Presence.light = ( ( byte5 & 0b00000011 ) == 2 );
+    SW_Device.Presence.motion = ( ( byte1 & 0b01000000 ) == 0b01000000 );
     SW_Device.Presence.battery = ( byte2 & 0b01111111 );
 
     // Serial.printf( "Presence: MAC = %s, motion = %i, light = %i, battery = %i\n", Device.MAC, SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Presence.battery );
@@ -619,7 +742,7 @@ bool BLE_Device::parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 9)
+    if (Device.DataSize != CONTACT_DATA_SIZE)
     {
         return false;
     }
@@ -633,25 +756,25 @@ bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     uint8_t byte7 = Device.Data[ 7 ];
     uint8_t byte8 = Device.Data[ 8 ];
 
-    SW_Device.Contact.motion =  ((byte1 & 0b01000000) == 0b01000000);
+    SW_Device.Contact.motion = ( ( byte1 & 0b01000000 ) == 0b01000000 );
     SW_Device.Contact.battery = ( byte2 & 0b01111111 );
-    SW_Device.Contact.light = (byte3 & 0b00000001) == 0b00000001;
-    SW_Device.Contact.contact = ((byte3 & 0b00000110) != 0);
-    SW_Device.Contact.leftOpen = ((byte3 & 0b00000100) != 0);
-    SW_Device.Contact.lastMotion = (byte4 * 256) + byte5;
-    SW_Device.Contact.lastContact = (byte6 * 256) + byte7;
-    SW_Device.Contact.buttonPresses = (byte8 & 0b00001111); // Increments every time button is pressed
-    SW_Device.Contact.entryCount = ((byte8 >> 6) & 0b00000011); // Increments every time someone enters
-    SW_Device.Contact.exitCount = ((byte8 >> 4) & 0b00000011); // Increments every time someone exits
+    SW_Device.Contact.light = ( byte3 & 0b00000001 ) == 0b00000001;
+    SW_Device.Contact.contact = ( ( byte3 & 0b00000110 ) != 0 );
+    SW_Device.Contact.leftOpen = ( ( byte3 & 0b00000100 ) != 0 );
+    SW_Device.Contact.lastMotion = ( byte4 * 256 ) + byte5;
+    SW_Device.Contact.lastContact = ( byte6 * 256 ) + byte7;
+    SW_Device.Contact.buttonPresses = ( byte8 & 0b00001111 ); // Increments every time button is pressed
+    SW_Device.Contact.entryCount = ( ( byte8 >> 6 ) & 0b00000011 ); // Increments every time someone enters
+    SW_Device.Contact.exitCount = ( ( byte8 >> 4 ) & 0b00000011 ); // Increments every time someone exits
 
     // Serial.printf( "Contact: MAC = %s, contact = %i, motion = %i, light = %i, left open = %i, button presses = %i, entry count = %i, exit count = %i, battery = %i\n", Device.MAC, SW_Device.Contact.contact, SW_Device.Presence.motion, SW_Device.Presence.light, SW_Device.Contact.leftOpen, SW_Device.Contact.buttonPresses, SW_Device.Contact.entryCount, SW_Device.Contact.exitCount, SW_Device.Presence.battery );
-    
+
     return true;
 }
 
 bool BLE_Device::parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 4)
+    if (Device.DataSize != REMOTE_DATA_SIZE)
     {
         return false;
     }
@@ -671,7 +794,7 @@ bool BLE_Device::parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != 14)
+    if (Device.DataSize != BULB_DATA_SIZE)
     {
         return false;
     }
@@ -681,9 +804,9 @@ bool BLE_Device::parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     uint8_t byte10 = Device.Data[ 11 ];
 
     SW_Device.Bulb.sequence = byte8;
-    SW_Device.Bulb.on_off = ((byte9 & 0x80) == 0x80);
-    SW_Device.Bulb.dim = (byte9 & 0x7F);
-    SW_Device.Bulb.lightState = (byte10 & 0x03);
+    SW_Device.Bulb.on_off = ( ( byte9 & 0x80 ) == 0x80 );
+    SW_Device.Bulb.dim = ( byte9 & 0x7F );
+    SW_Device.Bulb.lightState = ( byte10 & 0x03 );
 
     // Serial.printf( "Bulb: MAC = %s, Sequence = %i, On_Off = %i, Dim = %i, LightState = %i\n", Device.MAC, SW_Device.Bulb.sequence,  SW_Device.Bulb.on_off, SW_Device.Bulb.dim, SW_Device.Bulb.lightState );
 
@@ -712,7 +835,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
         return false;
     }
 
-   // Serial.printf( "Request to add: %s\n", url );
+    // Serial.printf( "Request to add: %s\n", url );
 
     for (uint8_t i = 0; i < NumCallbacks; i++)
     {
@@ -828,7 +951,7 @@ bool CommandQ::Push( String Address, String Data, String ReplyTo )
     if (NumQd < QSize)
     {
         NumQd++;
-        
+
         BLE_COMMAND* entry = &Callbacks[ QEntry++ ];
         if (QEntry == QSize)
         {
@@ -868,7 +991,7 @@ bool CommandQ::Pop( BLE_COMMAND* pBLE_Command )
     if (NumQd > 0)
     {
         NumQd--;
-        
+
         BLE_COMMAND* pEntry = &Callbacks[ QExit++ ];
         memcpy( pBLE_Command, pEntry, sizeof( BLE_COMMAND ) );
 

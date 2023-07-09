@@ -111,7 +111,10 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
     void onResult( BLEAdvertisedDevice* advertisedDevice )
     {
         // We have found a device, let us now see if it contains the service we are looking for.
-//        if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService( serviceUUID ))
+        NimBLEUUID id1((uint16_t)0x0d00);
+        NimBLEUUID id2((uint16_t)0xfd3d);
+        NimBLEUUID devicId = advertisedDevice->getServiceDataUUID();
+        if ((devicId == id1)  || (devicId == id2))
         {
             if (BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), (uint8_t*)advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length(), (uint8_t*)advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length() ))
             {
@@ -271,8 +274,8 @@ void setup()
     server.on( "/api/v1/device", HTTP_GET, []( AsyncWebServerRequest* request )
         {
             digitalWrite( led, 1 );
-            Serial.println( "Received request for device" );
             String address = request->arg( "address" );
+            Serial.printf( "Received request for device: %s\n", address.c_str() );
 
             int deviceIdx = BLE_Devices.FindDevice( address.c_str() );
 
