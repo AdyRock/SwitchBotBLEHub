@@ -52,7 +52,18 @@
 #define REMOTE_DATA_SIZE 4
 #define REMOTE_DATA_ID 'b'
 
-bool ValidateData( uint8_t Type, uint16_t BLEDataSize, uint16_t ManufactureDataSize )
+
+void printHex( uint8_t* data, uint8_t len )
+{
+    for (uint8_t i = 0; i < len; i++)
+    {
+        Serial.printf( "%02X ", data[ i ] );
+    }
+
+    Serial.println("");
+}
+
+bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t* ManufactureData, uint16_t ManufactureDataSize )
 {
     if (( Type != TH_I_DATA_ID ) &&
         ( Type != TH_T_DATA_ID ) &&
@@ -121,10 +132,12 @@ bool ValidateData( uint8_t Type, uint16_t BLEDataSize, uint16_t ManufactureDataS
         }
 
         Serial.printf( "Invalid %c BLE data: size = %i\n", Type, BLEDataSize );
+        printHex( BLEData, BLEDataSize );
         return false;
     }
 
     Serial.printf( "Invalid %c Manufacture data: size = %i\n", Type, ManufactureDataSize );
+    printHex( ManufactureData, ManufactureDataSize );
     return false;
 }
 
@@ -142,16 +155,6 @@ bool strcmpnc( const char* s1, const char* s2 )
     }
 
     return true;
-}
-
-void printHex( uint8_t* data, uint8_t len )
-{
-    for (uint8_t i = 0; i < len; i++)
-    {
-        Serial.printf( "%02X ", data[ i ] );
-    }
-
-    Serial.println();
 }
 
 BLE_Device::BLE_Device()
@@ -190,7 +193,7 @@ int BLE_Device::FindDevice( const char* MAC )
 
 bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if (!ValidateData( BLEData[ 0 ], BLEDataSize, ManufactureDataSize ))
+    if (!ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ))
     {
         // Wrong type or wrong data size
         return false;
@@ -221,6 +224,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
     Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
 
     strcpy( BLE_devices[ NumDevices ].MAC, MAC );
+    strupr( BLE_devices[ NumDevices ].MAC );
     if (BLEData[ 0 ] == BULB_DATA_ID)
     {
         // use manufacture data
@@ -336,7 +340,7 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
 
 void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if (!ValidateData( BLEData[ 0 ], BLEDataSize, ManufactureDataSize ))
+    if (!ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ))
     {
         return;
     }

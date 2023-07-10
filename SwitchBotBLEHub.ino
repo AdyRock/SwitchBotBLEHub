@@ -170,7 +170,10 @@ void setup()
                         JsonObject callbackAddress = jsonDoc.as<JsonObject>();
                         if (OurCallbacks.Add( callbackAddress[ "uri" ], millis() ))
                         {
-                            String msg = "OK";
+                            char Buf[ 100 ];
+                            int bytes = snprintf( Buf, 100, "OK: %i", BLE_Devices.GetNumberOfDevices() );
+
+                            String msg = Buf;
                             request->send( 200, "text/plain", msg );
                         }
                         else
@@ -442,6 +445,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
     // Register the device we are looking for so the scan stop as soon as it is found
     strcpy( lookingForBLEAddress, BLECommand->Address );
+    strlwr(lookingForBLEAddress);
     
     // Scan for max 10 seconds or until the device is found
     NimBLEScanResults results = pBLEScan->start( 10 );

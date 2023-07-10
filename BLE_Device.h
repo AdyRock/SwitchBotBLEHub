@@ -153,6 +153,7 @@ public:
     int AllToJson( char* Buf, int BufSize, bool OnlyChanged, char* macAddress );
     void ClearChanged();
     bool HasChanged();
+    int GetNumberOfDevices() { return NumDevices; };
 };
 
 typedef struct CALL_BACK
