@@ -43,6 +43,9 @@
 #define CURTAIN_DATA_SIZE 6
 #define CURTAIN_DATA_ID 'c'
 
+#define CURTAIN3_DATA_SIZE 6
+#define CURTAIN3_DATA_ID '{'
+
 #define PRESENCE_DATA_SIZE 6
 #define PRESENCE_DATA_ID 's'
 
@@ -69,6 +72,7 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
         ( Type != TH_T_DATA_ID ) &&
         ( Type != BOT_DATA_ID ) &&
         ( Type != CURTAIN_DATA_ID ) &&
+        ( Type != CURTAIN3_DATA_ID ) &&
         ( Type != PRESENCE_DATA_ID ) &&
         ( Type != CONTACT_DATA_ID ) &&
         ( Type != REMOTE_DATA_ID ) &&
@@ -115,6 +119,10 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
             return true;
         }
         else if (( Type == CURTAIN_DATA_ID ) && ( BLEDataSize == CURTAIN_DATA_SIZE ))
+        {
+            return true;
+        }
+        else if (( Type == CURTAIN3_DATA_ID ) && ( BLEDataSize == CURTAIN3_DATA_SIZE ))
         {
             return true;
         }
@@ -406,6 +414,14 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
             return bytes;
         }
 
+        if (Device.model == CURTAIN3_DATA_ID)
+        {
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoCurtain3\",\"calibration\":%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
+                Device.model, ( Device.curtain.calibration ? "true" : "false" ), Device.curtain.battery, Device.curtain.position, Device.curtain.lightLevel );
+
+            return bytes;
+        }
+
         if (Device.model == BLIND_DATA_ID)
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\",\"battery\":%i,\"position\":%i,\"version\":%i}}",
@@ -571,7 +587,7 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     {
         return parseBot( Device, SW_Device );
     }
-    else if (Device.Data[ 0 ] == CURTAIN_DATA_ID)
+    else if ((Device.Data[ 0 ] == CURTAIN_DATA_ID) || (Device.Data[ 0 ] == CURTAIN3_DATA_ID))
     {
         return parseCurtain( Device, SW_Device );
     }
@@ -624,7 +640,7 @@ bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != CURTAIN_DATA_SIZE)
+    if ((Device.DataSize < CURTAIN_DATA_SIZE) && (Device.DataSize < CURTAIN3_DATA_SIZE))
     {
         return false;
     }
