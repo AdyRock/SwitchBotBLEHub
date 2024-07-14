@@ -43,6 +43,7 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
     ```html
     ArduinoJson by Benoit Blanchon version 0.1.2
     NimBLE-Arduino by h2zero version 1.2.0
+    ElegantOTA version 3
     ```
 
 7. Install the follwing packages from the internet:
@@ -50,21 +51,22 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
    ```html
     AsyncTCP from https://github.com/me-no-dev/AsyncTCP
     ESPAsyncWebServer from https://github.com/me-no-dev/ESPAsyncWebServer
-    https://github.com/ayushsharma82/AsyncElegantOTA
     https://github.com/alanswx/ESPAsyncWiFiManager
    ```
 
-8. Connect the board to you computer via USB and select the Port on the Tools menu.
+8. Edit the file ElegantOTA.h located in your Arduino library folder (...\Arduino\libraries\ElegantOTA\src) and change the line '#define ELEGANTOTA_USE_ASYNC_WEBSERVER 0' to '#define ELEGANTOTA_USE_ASYNC_WEBSERVER 1'
 
-9. Build and download the code to the board.
+9. Connect the board to you computer via USB and select the Port on the Tools menu.
 
-10. If the device hasn't ben connected to your WiFi already then connect to the SwitchBot_ESP32 Access Point.
+10. Build and download the code to the board.
 
-11. If you don't get a join network pop-up then use a browser to open any web page (it should redirect) or connect to 192.168.4.1.
+11. If the device hasn't ben connected to your WiFi already then connect to the SwitchBot_ESP32 Access Point.
 
-12. Choose one of the detected access points and enter the password, then click save.
+12. If you don't get a join network pop-up then use a browser to open any web page (it should redirect) or connect to 192.168.4.1.
 
-13. The hub will try to connect to your WiFi and then start working. If the connection fails, reconnect to the AP and reconfigure.
+13. Choose one of the detected access points and enter the password, then click save.
+
+14. The hub will try to connect to your WiFi and then start working. If the connection fails, reconnect to the AP and reconfigure.
 
 Once the board is up and running, take it to a location that is withing range of the SwitchBot device(s) and connect it to a USB PSU. It should detect the BLE devices within a few seconds.
 

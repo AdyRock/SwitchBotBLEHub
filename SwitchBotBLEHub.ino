@@ -15,7 +15,6 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
-
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
@@ -24,13 +23,13 @@
 #include <AsyncUDP.h>             // https://github.com/espressif/arduino-esp32/tree/master/libraries/AsyncUDP
 #include <NimBLEDevice.h>         // https://github.com/h2zero/NimBLE-Arduino/blob/master/docs/New_user_guide.md
 #include <ArduinoJson.h>
-#include <AsyncElegantOTA.h>      // https://randomnerdtutorials.com/esp32-ota-over-the-air-arduino/
+#include <ElegantOTA.h>           // https://github.com/ayushsharma82/ElegantOTA
 
 #include "BLE_Device.h"
 
-const char* version = "Hello! SwitchBot BLE Hub V1.6";
+const char* version = "Hello! SwitchBot BLE Hub V1.7";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 1.6</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 1.7</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -38,6 +37,8 @@ CommandQ BLECommandQ;
 AsyncWebServer server( 80 );
 DNSServer dns;
 AsyncUDP udp;
+
+unsigned long ota_progress_millis = 0;
 
 const int led = 14;
 
@@ -131,6 +132,33 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
         }
     }; // onResult
 }; // MyAdvertisedDeviceCallbacks
+
+void onOTAStart()
+{
+  // Log when OTA has started
+  Serial.println("OTA update started!");
+  // <Add your own code here>
+}
+
+void onOTAProgress(size_t current, size_t final)
+{
+  // Log every 1 second
+  if (millis() - ota_progress_millis > 1000) {
+    ota_progress_millis = millis();
+    Serial.printf("OTA Progress Current: %u bytes, Final: %u bytes\n", current, final);
+  }
+}
+
+void onOTAEnd(bool success)
+{
+  // Log when OTA has finished
+  if (success) {
+    Serial.println("OTA update finished successfully!");
+  } else {
+    Serial.println("There was an error during OTA update!");
+  }
+  // <Add your own code here>
+}
 
 void setup()
 {    
@@ -293,7 +321,13 @@ void setup()
 
     server.onNotFound( handleNotFound );
 
-    AsyncElegantOTA.begin(&server);
+    ElegantOTA.begin(&server);
+    
+    // ElegantOTA callbacks
+    ElegantOTA.onStart(onOTAStart);
+    ElegantOTA.onProgress(onOTAProgress);
+    ElegantOTA.onEnd(onOTAEnd);
+
     server.begin();
     Serial.println( "HTTP server started" );
 
@@ -346,7 +380,7 @@ void loop()
         if (millis() >= sendBroadcast)
         {
             //Send multicast
-            Serial.printf( "\n***Broadcasting my details: %s***\n", macAddress );
+            Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
             udp.printf( "SwitchBot BLE Hub! %s", macAddress );
             sendBroadcast = millis() + 60000;
         }
