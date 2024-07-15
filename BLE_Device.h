@@ -104,6 +104,12 @@ struct SWICHBOT_BULB
     uint8_t lightState;
 };
 
+struct SWICHBOT_WATERLEAK
+{
+    uint8_t status;
+    uint8_t battery;
+};
+
 typedef struct SWITCHBOT
 {
     char MAC[ 18 ];
@@ -119,6 +125,7 @@ typedef struct SWITCHBOT
         struct SWICHBOT_REMOTE Remote;
         struct SWICHBOT_BULB Bulb;
         struct SWICHBOT_BLIND blind;
+        struct SWICHBOT_WATERLEAK WaterLeak;
     };
 };
 
@@ -138,6 +145,7 @@ private:
     bool parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     bool parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+    bool parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
     
 public:
 

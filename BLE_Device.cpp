@@ -55,6 +55,9 @@
 #define REMOTE_DATA_SIZE 4
 #define REMOTE_DATA_ID 'b'
 
+#define WATERLEAK_DATA_SIZE 22
+#define WATERLEAK_DATA_ID '&'
+
 
 void printHex( uint8_t* data, uint8_t len )
 {
@@ -68,6 +71,8 @@ void printHex( uint8_t* data, uint8_t len )
 
 bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t* ManufactureData, uint16_t ManufactureDataSize )
 {
+    int expected_size = 0;
+
     if (( Type != TH_I_DATA_ID ) &&
         ( Type != TH_T_DATA_ID ) &&
         ( Type != BOT_DATA_ID ) &&
@@ -78,7 +83,8 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
         ( Type != REMOTE_DATA_ID ) &&
         ( Type != BULB_DATA_ID ) &&
         ( Type != BLIND_DATA_ID ) &&
-        ( Type != IOTH_DATA_ID ))
+        ( Type != IOTH_DATA_ID ) &&
+        ( Type != WATERLEAK_DATA_ID ))
     {
         return false;
     }
@@ -89,6 +95,7 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
         {
             return true;
         }
+        expected_size = BULB_DATA_SIZE - 1;
     }
     else if (Type == IOTH_DATA_ID)
     {
@@ -96,6 +103,7 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
         {
             return true;
         }
+        expected_size = IOTH_DATA_SIZE - 1;
     }
     else if (Type == BLIND_DATA_ID)
     {
@@ -103,6 +111,15 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
         {
             return true;
         }
+        expected_size = BLIND_DATASIZE - 1;
+    }
+    else if (Type == WATERLEAK_DATA_ID)
+    {
+        if ( ManufactureDataSize == WATERLEAK_DATA_SIZE - 1 )
+        {
+            return true;
+        }
+        expected_size = WATERLEAK_DATA_SIZE - 1;
     }
     else
     {
@@ -139,7 +156,7 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
             return true;
         }
 
-        Serial.printf( "Invalid %c BLE data: size = %i\n", Type, BLEDataSize );
+        Serial.printf( "Invalid %c BLE data: expect size = %i, size = %i\n", Type, expected_size, BLEDataSize );
         printHex( BLEData, BLEDataSize );
         return false;
     }
@@ -248,6 +265,14 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
         BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
         BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
     }
+    else if (BLEData[ 0 ] == WATERLEAK_DATA_ID)
+    {
+        // use manufacture data
+        memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+        BLE_devices[ NumDevices ].Data[ 0 ] = WATERLEAK_DATA_ID;
+        BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+        BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+    }
     else
     {
         memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
@@ -268,7 +293,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData, uint8_t
 // Return true if the device data is the same
 bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_t BLEDataSize, uint8_t* ManufactureData, uint8_t ManufactureDataSize )
 {
-    if (( BLEData[ 0 ] == BULB_DATA_ID ) || ( BLEData[ 0 ] == IOTH_DATA_ID ) || ( BLEData[ 0 ] == BLIND_DATA_ID ))
+    if (( BLEData[ 0 ] == BULB_DATA_ID ) || ( BLEData[ 0 ] == IOTH_DATA_ID ) || ( BLEData[ 0 ] == BLIND_DATA_ID ) || ( BLEData[ 0 ] == WATERLEAK_DATA_ID ))
     {
         if (ManufactureDataSize != BLE_devices[ Index ].DataSize - 1)
         {
@@ -343,6 +368,17 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8
         return true;
     }
 
+    if (BLEData[ 0 ] == WATERLEAK_DATA_ID)
+    {
+        // Compare the Water Leak sensor differently as it uses manufacture data
+        if (( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) || ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     return ( memcmp( BLE_devices[ Index ].Data, BLEData, BLE_devices[ Index ].DataSize ) == 0 );
 }
 
@@ -366,6 +402,12 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData, uint8_
         BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
     }
     else if (BLEData[ 0 ] == BLIND_DATA_ID)
+    {
+        memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
+        BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
+        BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
+    }
+    else if (BLEData[ 0 ] == WATERLEAK_DATA_ID)
     {
         memcpy( BLE_devices[ Index ].Data + 1, ManufactureData, ManufactureDataSize );
         BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
@@ -482,6 +524,14 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize, char* macAd
         {
             bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoIOSensor\",\"temperature\":{\"c\": %0.1f},\"battery\":%i,\"humidity\":%i}}",
                 Device.model, Device.thermometer.temperature, Device.thermometer.battery, Device.thermometer.humidity );
+
+            return bytes;
+        }
+
+        if (Device.model == WATERLEAK_DATA_ID)
+        {
+            bytes += snprintf( Buf + bytes, BufSize - bytes, "{\"model\":\"%c\",\"modelName\":\"WoWaterLeak\",\"battery\":%i,\"status\":%i}}",
+                Device.model, Device.WaterLeak.battery, Device.WaterLeak.status );
 
             return bytes;
         }
@@ -614,6 +664,10 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     else if (Device.Data[ 0 ] == BLIND_DATA_ID)
     {
         return parseBlind( Device, SW_Device );
+    }
+    else if (Device.Data[ 0 ] == WATERLEAK_DATA_ID)
+    {
+        return parseWaterLeak( Device, SW_Device );
     }
 
     Serial.println( "Failed to parse device: Unrecognised device type");
@@ -829,6 +883,22 @@ bool BLE_Device::parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
     SW_Device.Bulb.lightState = ( byte10 & 0x03 );
 
     // Serial.printf( "Bulb: MAC = %s, Sequence = %i, On_Off = %i, Dim = %i, LightState = %i\n", Device.MAC, SW_Device.Bulb.sequence,  SW_Device.Bulb.on_off, SW_Device.Bulb.dim, SW_Device.Bulb.lightState );
+
+    return true;
+}
+
+bool BLE_Device::parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+    if (Device.DataSize != WATERLEAK_DATA_SIZE)
+    {
+        return false;
+    }
+
+    uint8_t byte10 = Device.Data[ 11 ];
+
+    SW_Device.WaterLeak.status = ( byte10 & 0x01 );
+
+    // Serial.printf( "Water Leak: MAC = %s, StatUS = %i\n", Device.MAC, SW_Device.WaterLeak.Status );
 
     return true;
 }
