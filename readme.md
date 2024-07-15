@@ -36,7 +36,7 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
     ```
 
 3. In the Tools - Boards manager select the esp32 by Espressif Systems v 1.0.4
-4. Then select the board type as ESP32 Arduino - ESP 32 Dev Module.
+4. Then select the board type as ESP32 Arduino - ESP32 Dev Module.
 5. Next, change the Tools - Partion Scheme to Minimal SPIFFS (1.9MB App with OTA/190KB SPIFFS ). This allows the programs size to fit on the board plus leave room for the bootloader.
 6. You will need to install the following libraries into your system from the Sketch - Include Library menu:
 
@@ -51,7 +51,7 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
    ```html
     AsyncTCP from https://github.com/me-no-dev/AsyncTCP
     ESPAsyncWebServer from https://github.com/me-no-dev/ESPAsyncWebServer
-    https://github.com/alanswx/ESPAsyncWiFiManager
+    ESPAsyncWiFiManager from https://github.com/alanswx/ESPAsyncWiFiManager
    ```
 
 8. Edit the file ElegantOTA.h located in your Arduino library folder (...\Arduino\libraries\ElegantOTA\src) and change the line '#define ELEGANTOTA_USE_ASYNC_WEBSERVER 0' to '#define ELEGANTOTA_USE_ASYNC_WEBSERVER 1'
@@ -73,4 +73,4 @@ Once the board is up and running, take it to a location that is withing range of
 The board also supports Over The Air updates so future updates can be sent directly to the board.
 Open a browser on a computer connected to the same network as the board. Navigate to http://board_ip_address/update
 
-Select the Firmware option and then choose the SwitchBotBLEHub.ino.esp32.bin file. The file download should start straight away.
+Select the Firmware option and then choose the SwitchBotBLEHub.ino.bin file from the \build\esp32.esp32.esp32 folder. The file download should start straight away.
