@@ -123,35 +123,35 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
     }
     else
     {
-        if (( Type == TH_I_DATA_ID ) && ( BLEDataSize == TH_I_DATA_SIZE ))
+        if (( Type == TH_I_DATA_ID ) && ( BLEDataSize >= TH_I_DATA_SIZE ))
         {
             return true;
         }
-        else if (( Type == TH_T_DATA_ID ) && ( BLEDataSize == TH_T_DATA_SIZE ))
+        else if (( Type == TH_T_DATA_ID ) && ( BLEDataSize >= TH_T_DATA_SIZE ))
         {
             return true;
         }
-        else if (( Type == BOT_DATA_ID ) && ( BLEDataSize == BOT_DATA_SIZE ))
+        else if (( Type == BOT_DATA_ID ) && ( BLEDataSize >= BOT_DATA_SIZE ))
         {
             return true;
         }
-        else if (( Type == CURTAIN_DATA_ID ) && ( BLEDataSize == CURTAIN_DATA_SIZE ))
+        else if (( Type == CURTAIN_DATA_ID ) && ( BLEDataSize >= CURTAIN_DATA_SIZE ))
         {
             return true;
         }
-        else if (( Type == CURTAIN3_DATA_ID ) && ( BLEDataSize == CURTAIN3_DATA_SIZE ))
+        else if (( Type == CURTAIN3_DATA_ID ) && ( BLEDataSize >= CURTAIN3_DATA_SIZE ))
         {
             return true;
         }
-        else if (( Type == PRESENCE_DATA_ID ) && ( BLEDataSize == PRESENCE_DATA_SIZE ))
+        else if (( Type == PRESENCE_DATA_ID ) && ( BLEDataSize >= PRESENCE_DATA_SIZE ))
         {
             return true;
         }
-        else if (( Type == CONTACT_DATA_ID ) && ( BLEDataSize == CONTACT_DATA_SIZE ))
+        else if (( Type == CONTACT_DATA_ID ) && ( BLEDataSize >= CONTACT_DATA_SIZE ))
         {
             return true;
         }
-        else if (( Type == REMOTE_DATA_ID ) && ( BLEDataSize == REMOTE_DATA_SIZE ))
+        else if (( Type == REMOTE_DATA_ID ) && ( BLEDataSize >= REMOTE_DATA_SIZE ))
         {
             return true;
         }
@@ -676,7 +676,7 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
-    if (Device.DataSize != BOT_DATA_SIZE)
+    if (Device.DataSize < BOT_DATA_SIZE)
     {
         return false;
     }

@@ -27,9 +27,9 @@
 
 #include "BLE_Device.h"
 
-const char* version = "Hello! SwitchBot BLE Hub V1.8";
+const char* version = "Hello! SwitchBot BLE Hub V1.9";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 1.8</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 1.9</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -272,7 +272,7 @@ void setup()
                         {
                             String msg = "Unknown device";
                             request->send( 422, "text/plain", msg );
-                            Serial.printf( "Received request to write device but I have not seen that device)\n", clientAddress.c_str() );
+                            Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress.c_str() );
                         }
                     }
                     else
