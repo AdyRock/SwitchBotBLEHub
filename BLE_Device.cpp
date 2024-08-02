@@ -296,7 +296,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		return false;
 	}
 
-	Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
+	// Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
 
 	strcpy( BLE_devices[ NumDevices ].MAC, MAC );
 	strupr( BLE_devices[ NumDevices ].MAC );
@@ -538,8 +538,8 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 	BLE_devices[ Index ].rssi	 = rssi;
 	Changed						 = true;
 
-	Serial.printf( "Updated %s @ %i = %c\n", BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
-	printHex( BLE_devices[ Index ].Data, BLE_devices[ Index ].DataSize );
+	// Serial.printf( "Updated %s @ %i = %c\n", BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
+	// printHex( BLE_devices[ Index ].Data, BLE_devices[ Index ].DataSize );
 }
 
 // Returns false if Index is beyond the last entry
@@ -769,6 +769,8 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged,
 
 	if ( totaleBytes < 3 )
 	{
+		Buf[ 1 ] = ']';
+		Buf[ 2 ] = 0;
 		inAllToJson = false;
 		return 0;
 	}

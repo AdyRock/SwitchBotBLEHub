@@ -47,7 +47,6 @@ const int led = 14;
 
 char macAddress[ 18 ];
 unsigned long sendBroadcast = 0;
-char lookingForBLEAddress[ 18 ];
 uint8_t BLENotifyData[ 50 ];
 int BLENotifyLength = 0;
 bool RebootRequired = false;
@@ -123,14 +122,11 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 		{
 			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* ) advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length(), ( uint8_t* ) advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length() ) )
 			{
-				if ( lookingForBLEAddress[ 0 ] != 0 )
-				{
-					if ( strcmp( lookingForBLEAddress, advertisedDevice->getAddress().toString().c_str() ) == 0 )
-					{
-						BLEScan* pBLEScan = BLEDevice::getScan();
-						pBLEScan->stop();
-					}
-				}
+				// Serial.printf( "Found device: %s\n", advertisedDevice->getAddress().toString().c_str() );
+			}
+			else
+			{
+				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 			}
 		}
 	};	  // onResult
@@ -152,7 +148,7 @@ void setup()
 	Serial.print( "IP address: " );
 	Serial.println( WiFi.localIP() );
 
-	BLEDevice::init( "" );
+	// BLEDevice::init( "" );
 
 	server.on( "/", handleRoot );
 
@@ -266,12 +262,12 @@ void setup()
 			   {
             digitalWrite( led, 1 );
 
-            Serial.println( "Received request for devices" );
+            // Serial.println( "Received request for devices" );
             char* buf = ( char* ) malloc( 4096 );
             if (buf)
             {
               BLE_Devices.AllToJson( buf, 4096, false, macAddress );
-              Serial.println( buf );
+              // Serial.println( buf );
               request->send( 200, "application/json", buf );
               free( buf );
             }
@@ -287,7 +283,7 @@ void setup()
 			   {
             digitalWrite( led, 1 );
             String address = request->arg( "address" );
-            Serial.printf( "Received request for device: %s\n", address.c_str() );
+            // Serial.printf( "Received request for device: %s\n", address.c_str() );
 
             int deviceIdx = BLE_Devices.FindDevice( address.c_str() );
 
@@ -295,7 +291,7 @@ void setup()
             if (buf)
             {
               BLE_Devices.DeviceToJson( deviceIdx, buf, 2048, macAddress );
-              Serial.println( buf );
+              // Serial.println( buf );
               request->send( 200, "application/json", buf );
               free( buf );
             }
@@ -326,6 +322,7 @@ void setup()
 	pBLEScan->setInterval( 510 );
 	pBLEScan->setWindow( 200 );
 	pBLEScan->setActiveScan( true );
+//	pBLEScan->setMaxResults( 1 ); // Only store last device found
 	pBLEScan->start( 0, nullptr, false );
 
 	Serial.println( "Application started" );
@@ -372,14 +369,13 @@ void loop()
 		if ( millis() >= sendBroadcast )
 		{
 			// Send multicast
-			Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
+			// Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
 			udp.printf( "SwitchBot BLE Hub! %s", macAddress );
 			sendBroadcast = millis() + 60000;
 
 			// Report heap available
 			uint32_t freeHeap		  = esp_get_free_heap_size();
 			uint32_t largestHeapBlock = esp_get_minimum_free_heap_size();
-
 			Serial.printf( "\nFree Heap %i, Largest block %i\n\n", freeHeap, largestHeapBlock );
 		}
 
@@ -411,7 +407,7 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 {
 	// host = "192.168.1.1", ip or dns
 
-	Serial.printf( "Connecting to %s\n", host );
+	// Serial.printf( "Connecting to %s\n", host );
 
 	WiFiClient client;
 	HTTPClient http;
@@ -419,16 +415,16 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 	// configure target server and url
 	http.begin( client, host );	   // HTTP
 	http.addHeader( "Content-Type", "application/json" );
-	http.
+	http.setReuse( false );
 
-		// start connection and send HTTP header
-		int httpCode = http.POST( ( uint8_t* ) data, bytes );
+	// start connection and send HTTP header
+	int httpCode = http.POST( ( uint8_t* ) data, bytes );
 
 	// httpCode will be negative on error
 	if ( httpCode > 0 )
 	{
 		// HTTP header has been send and Server response header has been handled
-		Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
+		// Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
 	}
 	else
 	{
@@ -488,20 +484,11 @@ void SendChangedDevices()
 void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 {
 	BLEScan* pBLEScan = BLEDevice::getScan();
-	pBLEScan->stop();
 
 	BLEAddress bleAddress( BLECommand->Address );
 	Serial.printf( "Sending command to BLE device: %s\n", BLECommand->Address );
 
-	// Register the device we are looking for so the scan stop as soon as it is found
-	strcpy( lookingForBLEAddress, BLECommand->Address );
-	strlwr( lookingForBLEAddress );
-
-	// Scan for max 10 seconds or until the device is found
-	NimBLEScanResults results = pBLEScan->start( 10 );
-
-	// Clear the registered device to look for
-	lookingForBLEAddress[ 0 ] = 0;
+	NimBLEScanResults results = pBLEScan->getResults();
 
 	// Get the device (might be null if not found)
 	NimBLEAdvertisedDevice* pDevice = results.getDevice( bleAddress );
@@ -663,7 +650,8 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
 		NimBLEDevice::deleteClient( pBLEClient );
 	}
-
-	// Restart the continuos scan
-	pBLEScan->start( 0, nullptr, false );
+	else
+	{
+		Serial.println( "Device not found" );
+	}
 }
