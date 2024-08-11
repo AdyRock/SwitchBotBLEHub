@@ -28,9 +28,9 @@
 
 #include "BLE_Device.h"
 
-const char* version = "Hello! SwitchBot BLE Hub V2.0";
+const char* version = "Hello! SwitchBot BLE Hub V2.1";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.0</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.1</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -377,6 +377,11 @@ void loop()
 			uint32_t freeHeap		  = esp_get_free_heap_size();
 			uint32_t largestHeapBlock = esp_get_minimum_free_heap_size();
 			Serial.printf( "\nFree Heap %i, Largest block %i\n\n", freeHeap, largestHeapBlock );
+			if (largestHeapBlock < 20000)
+			{
+				Serial.println( "Low heap, rebooting" );
+				RebootRequired = true;
+			}
 		}
 
 		// Check if there is a BLE command to send
