@@ -27,10 +27,11 @@
 #include <ESPAsyncHTTPUpdateServer.h>
 
 #include "BLE_Device.h"
+#include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.1";
+const char* version = "Hello! SwitchBot BLE Hub V2.2";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.1</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.2</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -50,6 +51,7 @@ unsigned long sendBroadcast = 0;
 uint8_t BLENotifyData[ 50 ];
 int BLENotifyLength = 0;
 bool RebootRequired = false;
+int32_t NumUpdates = 0;
 
 // The remote service we wish to connect to.
 static BLEUUID serviceUUID( "cba20d00-224d-11e6-9fb8-0002a5d5c51b" );
@@ -122,12 +124,13 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 		{
 			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* ) advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length(), ( uint8_t* ) advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length() ) )
 			{
-				// Serial.printf( "Found device: %s\n", advertisedDevice->getAddress().toString().c_str() );
-			}
-			else
-			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
+        NumUpdates++;
 			}
+			// else
+			// {
+			// 	Serial.printf( "Ignored device: %s\n", advertisedDevice->getAddress().toString().c_str() );
+			// }
 		}
 	};	  // onResult
 };		  // MyAdvertisedDeviceCallbacks
@@ -227,7 +230,7 @@ void setup()
 						{
 							String dataToWrite = writeParameters[ "data" ];
 							String sourcIP	   = request->client()->remoteIP().toString();
-							// Serial.printf( "Received request to write device %s with %s (%i) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length(), sourcIP.c_str() );
+							Serial.printf( "Received request to write device %s with %s (%i) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length(), sourcIP.c_str() );
 
 							if ( BLECommandQ.Push( clientAddress, dataToWrite, sourcIP ) )
 							{
@@ -262,12 +265,12 @@ void setup()
 			   {
             digitalWrite( led, 1 );
 
-            // Serial.println( "Received request for devices" );
+            Serial.println( "Received request for devices" );
             char* buf = ( char* ) malloc( 4096 );
             if (buf)
             {
               BLE_Devices.AllToJson( buf, 4096, false, macAddress );
-              // Serial.println( buf );
+              Serial.println( buf );
               request->send( 200, "application/json", buf );
               free( buf );
             }
@@ -283,7 +286,7 @@ void setup()
 			   {
             digitalWrite( led, 1 );
             String address = request->arg( "address" );
-            // Serial.printf( "Received request for device: %s\n", address.c_str() );
+            Serial.printf( "Received request for device: %s\n", address.c_str() );
 
             int deviceIdx = BLE_Devices.FindDevice( address.c_str() );
 
@@ -362,8 +365,17 @@ void loop()
 		{
 			// Allow watchdog to restart the CPU
 			Serial.println( "Waiting for WD to reset system" );
-			while ( true )
-				;
+
+			cli();                  // Clear interrupts
+
+			esp_task_wdt_config_t wdt_config;
+			wdt_config.timeout_ms = 15;
+			wdt_config.idle_core_mask = 0xFFFFFFFF;
+			wdt_config.trigger_panic = true;
+
+			esp_task_wdt_init(&wdt_config);
+			esp_task_wdt_add(NULL);
+			while ( true );
 		}
 
 		if ( millis() >= sendBroadcast )
@@ -373,11 +385,14 @@ void loop()
 			udp.printf( "SwitchBot BLE Hub! %s", macAddress );
 			sendBroadcast = millis() + 60000;
 
+			Serial.printf( "BLE updates %i per minute\n", NumUpdates);
+			NumUpdates = 0;
+
 			// Report heap available
 			uint32_t freeHeap		  = esp_get_free_heap_size();
 			uint32_t largestHeapBlock = esp_get_minimum_free_heap_size();
 			Serial.printf( "\nFree Heap %i, Largest block %i\n\n", freeHeap, largestHeapBlock );
-			if (largestHeapBlock < 20000)
+			if (largestHeapBlock < 30000)
 			{
 				Serial.println( "Low heap, rebooting" );
 				RebootRequired = true;
@@ -412,7 +427,7 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 {
 	// host = "192.168.1.1", ip or dns
 
-	// Serial.printf( "Connecting to %s\n", host );
+	Serial.printf( "Connecting to %s to send %s\n", host, data );
 
 	WiFiClient client;
 	HTTPClient http;
@@ -429,7 +444,7 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 	if ( httpCode > 0 )
 	{
 		// HTTP header has been send and Server response header has been handled
-		// Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
+		Serial.printf( "[HTTP] POST response code: %d\n", httpCode );
 	}
 	else
 	{
