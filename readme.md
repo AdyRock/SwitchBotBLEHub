@@ -43,7 +43,7 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
     ```html
     ArduinoJson by Benoit Blanchon version 0.1.2
     NimBLE-Arduino by h2zero version 1.2.0
-    ElegantOTA version 3
+    ESPAsyncHTTPUpdateServer
     ```
 
 7. Install the follwing packages from the internet:
@@ -54,11 +54,9 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
     ESPAsyncWiFiManager from https://github.com/alanswx/ESPAsyncWiFiManager
    ```
 
-8. Edit the file ElegantOTA.h located in your Arduino library folder (...\Arduino\libraries\ElegantOTA\src) and change the line '#define ELEGANTOTA_USE_ASYNC_WEBSERVER 0' to '#define ELEGANTOTA_USE_ASYNC_WEBSERVER 1'
+8. Connect the board to you computer via USB and select the Port on the Tools menu.
 
-9. Connect the board to you computer via USB and select the Port on the Tools menu.
-
-10. Build and download the code to the board.
+9. Build and download the code to the board.
 
 
 ## Installation Method 2 via the Flash downloader
