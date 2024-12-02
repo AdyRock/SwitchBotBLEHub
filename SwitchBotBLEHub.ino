@@ -29,9 +29,9 @@
 #include "BLE_Device.h"
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.3";
+const char* version = "Hello! SwitchBot BLE Hub V2.4";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.3</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.4</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -136,11 +136,11 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 		}
 	};	  // onResult
 
-  void onScanEnd(const NimBLEScanResults& results, int reason) override
-  {
-        Serial.printf("Scan ended reason = %d; restarting scan\n", reason);
-        NimBLEDevice::getScan()->start(scanTime, false, true);
-    }
+  // void onScanEnd(const NimBLEScanResults& results, int reason) override
+  // {
+  //       Serial.printf("Scan ended reason = %d; restarting scan\n", reason);
+  //       NimBLEDevice::getScan()->start(scanTime, false, true);
+  //   }
 };		  // MyAdvertisedDeviceCallbacks
 
 void setup()
@@ -333,7 +333,7 @@ void setup()
 	pBLEScan->setInterval( 510 );
 	pBLEScan->setWindow( 200 );
 	pBLEScan->setActiveScan( true );
-	pBLEScan->setMaxResults( 0 );
+	pBLEScan->setMaxResults( 0xFF );
 	pBLEScan->start( 0, false, true );
 
 	Serial.println( "Application started" );
@@ -515,13 +515,27 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
 	const BLEAddress bleAddress( BLECommand->Address );
 	Serial.printf( "Sending command to BLE device: %s\n", BLECommand->Address );
+  uint64_t requestAddress = bleAddress;
 
 	NimBLEScanResults results = pBLEScan->getResults();
+  uint8_t numResults = results.getCount();
+  const NimBLEAdvertisedDevice* pDevice = nullptr;
+  for (int i = 0; i < numResults; i++)
+  {
+  	pDevice = results.getDevice( i );
+
+    uint64_t deviceAddress = pDevice->getAddress();
+    if (deviceAddress == requestAddress)
+    {
+      break;
+    }
+
+  }
 
 	// Get the device (might be null if not found)
-	const NimBLEAdvertisedDevice* pDevice = results.getDevice( bleAddress );
+//	const NimBLEAdvertisedDevice* pDevice = results.getDevice( bleAddress );
 
-	if ( pDevice )
+	if ( pDevice != nullptr )
 	{
 		// The device was found so create a clinet to connect to it
 		NimBLEClient* pBLEClient = NimBLEDevice::createClient();
