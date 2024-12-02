@@ -42,7 +42,7 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
 
     ```html
     ArduinoJson by Benoit Blanchon version 0.1.2
-    NimBLE-Arduino by h2zero version 1.2.0
+    NimBLE-Arduino by h2zero version 2.0.0
     ESPAsyncHTTPUpdateServer
     ```
 

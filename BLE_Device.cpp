@@ -58,6 +58,12 @@
 #define WATERLEAK_DATA_SIZE 22
 #define WATERLEAK_DATA_ID	'&'
 
+#define METERPRO_DATA_SIZE 12
+#define METERPRO_DATA_ID	'4'
+
+#define METERPROCO2_DATA_SIZE 16
+#define METERPROCO2_DATA_ID	'5'
+
 void printHex( uint8_t* data, uint8_t len )
 {
 	char buf[ 100 ];
@@ -75,22 +81,6 @@ void printHex( uint8_t* data, uint8_t len )
 bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t* ManufactureData, uint16_t ManufactureDataSize )
 {
 	int expected_size = 0;
-
-	// if (( Type != TH_I_DATA_ID ) &&
-	//     ( Type != TH_T_DATA_ID ) &&
-	//     ( Type != BOT_DATA_ID ) &&
-	//     ( Type != CURTAIN_DATA_ID ) &&
-	//     ( Type != CURTAIN3_DATA_ID ) &&
-	//     ( Type != PRESENCE_DATA_ID ) &&
-	//     ( Type != CONTACT_DATA_ID ) &&
-	//     ( Type != REMOTE_DATA_ID ) &&
-	//     ( Type != BULB_DATA_ID ) &&
-	//     ( Type != BLIND_DATA_ID ) &&
-	//     ( Type != IOTH_DATA_ID ) &&
-	//     ( Type != WATERLEAK_DATA_ID ))
-	// {
-	//     return false;
-	// }
 
 	switch ( Type )
 	{
@@ -125,6 +115,22 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 				return true;
 			}
 			expected_size = WATERLEAK_DATA_SIZE - 1;
+			break;
+
+		case METERPRO_DATA_ID:
+			if ( ManufactureDataSize >= METERPRO_DATA_SIZE - 1 )
+			{
+				return true;
+			}
+			expected_size = METERPRO_DATA_SIZE - 1;
+			break;
+
+		case METERPROCO2_DATA_ID:
+			if ( ManufactureDataSize >= METERPROCO2_DATA_SIZE - 1 )
+			{
+				return true;
+			}
+			expected_size = METERPROCO2_DATA_SIZE - 1;
 			break;
 
 		default:
@@ -334,6 +340,26 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
 		}
 
+		case METERPRO_DATA_ID:
+		{
+			// use manufacture data
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData,
+					ManufactureDataSize );
+			BLE_devices[ NumDevices ].Data[ 0 ] = METERPRO_DATA_ID;
+			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
+		}
+
+		case METERPROCO2_DATA_ID:
+		{
+			// use manufacture data
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData,
+					ManufactureDataSize );
+			BLE_devices[ NumDevices ].Data[ 0 ] = METERPROCO2_DATA_ID;
+			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
+		}
+
 		default:
 		{
 			memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
@@ -364,6 +390,8 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		case IOTH_DATA_ID:
 		case BLIND_DATA_ID:
 		case WATERLEAK_DATA_ID:
+    case METERPRO_DATA_ID:
+    case METERPROCO2_DATA_ID:
 		{
 			if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 1 )
 			{
@@ -428,6 +456,7 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		}
 
 		case IOTH_DATA_ID:
+    case METERPRO_DATA_ID:
 		{
 			// Compare the IO TH sensor differently as it uses manufacture data
 			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
@@ -465,6 +494,22 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 			break;
 		}
 
+		case METERPROCO2_DATA_ID:
+		{
+			// Compare the Meter Pro differently as it uses manufacture data
+			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
+				 ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) ||
+				 ( ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ] ) ||
+				 ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) ||
+				 ( ManufactureData[ 15 ] != BLE_devices[ Index ].Data[ 16 ] ) ||
+				 ( ManufactureData[ 16 ] != BLE_devices[ Index ].Data[ 17 ] ) )
+			{
+				return false;
+			}
+
+			break;
+		}
+
 		default:
 			return ( memcmp( BLE_devices[ Index ].Data, BLEData,
 							 BLE_devices[ Index ].DataSize ) == 0 );
@@ -486,36 +531,10 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 	switch ( BLEData[ 0 ] )
 	{
 		case BULB_DATA_ID:
-		{
-			memcpy( BLE_devices[ Index ].Data + 1, ManufactureData,
-					ManufactureDataSize );
-			BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ Index ].DataSize  = ManufactureDataSize + 1;
-
-			break;
-		}
-
 		case IOTH_DATA_ID:
-		{
-			memcpy( BLE_devices[ Index ].Data + 1, ManufactureData,
-					ManufactureDataSize );
-			BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ Index ].DataSize  = ManufactureDataSize + 1;
-
-			break;
-		}
-
 		case BLIND_DATA_ID:
-		{
-			memcpy( BLE_devices[ Index ].Data + 1, ManufactureData,
-					ManufactureDataSize );
-			BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ Index ].DataSize  = ManufactureDataSize + 1;
-
-			break;
-		}
-
 		case WATERLEAK_DATA_ID:
+		case METERPROCO2_DATA_ID:
 		{
 			memcpy( BLE_devices[ Index ].Data + 1, ManufactureData,
 					ManufactureDataSize );
@@ -709,6 +728,33 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 				break;
 			}
 
+			case METERPRO_DATA_ID:
+			{
+				bytes += snprintf( Buf + bytes, BufSize - bytes,
+								   "{\"model\":\"%c\",\"modelName\":\"MeterPro\","
+								   "\"temperature\":{\"c\": "
+								   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
+								   Device.model, Device.thermometer.temperature,
+								   Device.thermometer.battery,
+								   Device.thermometer.humidity );
+
+				break;
+			}
+
+			case METERPROCO2_DATA_ID:
+			{
+				bytes += snprintf( Buf + bytes, BufSize - bytes,
+								   "{\"model\":\"%c\",\"modelName\":\"MeterPro(CO2)\","
+								   "\"temperature\":{\"c\": "
+								   "%0.1f},\"battery\":%i,\"humidity\":%i, \"co2\":%i}}",
+								   Device.model, Device.thermometer.temperature,
+								   Device.MeterProCO2.battery,
+								   Device.MeterProCO2.humidity,
+                   Device.MeterProCO2.co2 );
+
+				break;
+			}
+
 			default:
 				bytes += snprintf( Buf + bytes, BufSize - bytes,
 								   "{\"error\": \"Unknown model %c\"}}", Device.model );
@@ -865,6 +911,16 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		case WATERLEAK_DATA_ID:
 		{
 			return parseWaterLeak( Device, SW_Device );
+		}
+
+		case METERPRO_DATA_ID:
+		{
+			return parseMeterPro( Device, SW_Device );
+		}
+
+		case METERPROCO2_DATA_ID:
+		{
+			return parseMeterProCO2( Device, SW_Device );
 		}
 	}
 
@@ -1137,6 +1193,71 @@ bool BLE_Device::parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 	// Serial.printf( "Water Leak: MAC = %s, StatUS = %i\n", Device.MAC,
 	// SW_Device.WaterLeak.Status );
+
+	return true;
+}
+
+bool BLE_Device::parseMeterPro( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+	if ( Device.DataSize < METERPRO_DATA_SIZE )
+	{
+		return false;
+	}
+
+	uint8_t byte2  = Device.Data[ 2 ];
+	uint8_t byte10 = Device.Data[ 11 ];
+	uint8_t byte11 = Device.Data[ 12 ];
+	uint8_t byte12 = Device.Data[ 13 ];
+
+	float temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
+	SW_Device.thermometer.temperature =
+		temp_sign * ( ( float ) ( byte11 & 0b01111111 ) +
+					  ( ( float ) ( byte10 & 0b01111111 ) / 10 ) );
+
+	//    Serial.printf("W temp = %f, %f, %f, %f\n", temp_sign, (float)(byte11 &
+	//    0b01111111), ((float)(byte10 & 0b01111111) / 10),
+	//    SW_Device.thermometer.temperature);
+
+	SW_Device.thermometer.humidity = ( byte12 & 0b01111111 );
+	SW_Device.thermometer.battery  = ( byte2 & 0b01111111 );
+
+	// Serial.printf( "Thermometer: MAC = %s, temperature = %0.1f, humidity =
+	// %i, battery = %i\n", Device.MAC, SW_Device.thermometer.temperature,
+	// SW_Device.thermometer.humidity, SW_Device.thermometer.battery );
+
+	return true;
+}
+
+bool BLE_Device::parseMeterProCO2( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+	if ( Device.DataSize < METERPROCO2_DATA_SIZE )
+	{
+		return false;
+	}
+
+	uint8_t byte2  = Device.Data[ 2 ];
+	uint8_t byte10 = Device.Data[ 11 ];
+	uint8_t byte11 = Device.Data[ 12 ];
+	uint8_t byte12 = Device.Data[ 13 ];
+	uint8_t byte15 = Device.Data[ 16 ];
+	uint8_t byte16 = Device.Data[ 17 ];
+
+	float temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
+	SW_Device.MeterProCO2.temperature =
+		temp_sign * ( ( float ) ( byte11 & 0b01111111 ) +
+					  ( ( float ) ( byte10 & 0b01111111 ) / 10 ) );
+
+	//    Serial.printf("W temp = %f, %f, %f, %f\n", temp_sign, (float)(byte11 &
+	//    0b01111111), ((float)(byte10 & 0b01111111) / 10),
+	//    SW_Device.MeterProCO2.temperature);
+
+	SW_Device.MeterProCO2.humidity = ( byte12 & 0b01111111 );
+	SW_Device.MeterProCO2.battery  = ( byte2 & 0b01111111 );
+  SW_Device.MeterProCO2.co2 = (byte15 * 256) + byte16;
+
+	// Serial.printf( "MeterProCO2: MAC = %s, temperature = %0.1f, humidity =
+	// %i, battery = %i\n", Device.MAC, SW_Device.MeterProCO2.temperature,
+	// SW_Device.MeterProCO2.humidity, SW_Device.MeterProCO2.battery );
 
 	return true;
 }

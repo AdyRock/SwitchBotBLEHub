@@ -110,6 +110,15 @@ struct SWICHBOT_WATERLEAK
 	uint8_t battery;
 };
 
+struct SWICHBOT_CO2
+{
+	uint8_t battery;
+	float temperature;
+	uint8_t humidity;
+  uint16_t co2;
+};
+
+
 typedef struct SWITCHBOT
 {
 	char MAC[ 18 ];
@@ -126,6 +135,7 @@ typedef struct SWITCHBOT
 		struct SWICHBOT_BULB Bulb;
 		struct SWICHBOT_BLIND blind;
 		struct SWICHBOT_WATERLEAK WaterLeak;
+		struct SWICHBOT_CO2 MeterProCO2;
 	};
 };
 
@@ -146,6 +156,8 @@ class BLE_Device
 	bool parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+  bool parseMeterPro( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+  bool parseMeterProCO2( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 
   public:
 	BLE_Device();

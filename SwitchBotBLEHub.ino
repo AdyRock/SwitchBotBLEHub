@@ -29,9 +29,9 @@
 #include "BLE_Device.h"
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.2";
+const char* version = "Hello! SwitchBot BLE Hub V2.3";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.2</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.3</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -106,6 +106,8 @@ void notifyCallback(
 	BLENotifyLength = length;
 }
 
+static constexpr uint32_t scanTime = 30 * 1000; // 30 seconds scan time.
+
 /**
    Scan for BLE servers and find the first one that advertises the service we are looking for.
 */
@@ -114,7 +116,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 	/**
 		Called for each advertising BLE server.
 	*/
-	void onResult( BLEAdvertisedDevice* advertisedDevice )
+	void onResult( const BLEAdvertisedDevice* advertisedDevice ) override
 	{
 		// We have found a device, let us now see if it contains the service we are looking for.
 		NimBLEUUID id1( ( uint16_t ) 0x0d00 );
@@ -133,6 +135,12 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			// }
 		}
 	};	  // onResult
+
+  void onScanEnd(const NimBLEScanResults& results, int reason) override
+  {
+        Serial.printf("Scan ended reason = %d; restarting scan\n", reason);
+        NimBLEDevice::getScan()->start(scanTime, false, true);
+    }
 };		  // MyAdvertisedDeviceCallbacks
 
 void setup()
@@ -321,12 +329,12 @@ void setup()
 	// have detected a new device.  Specify that we want active scanning and start the
 	// scan to run for 5 seconds.
 	BLEScan* pBLEScan = BLEDevice::getScan();
-	pBLEScan->setAdvertisedDeviceCallbacks( new MyAdvertisedDeviceCallbacks(), true );
+	pBLEScan->setScanCallbacks( new MyAdvertisedDeviceCallbacks(), true );
 	pBLEScan->setInterval( 510 );
 	pBLEScan->setWindow( 200 );
 	pBLEScan->setActiveScan( true );
-//	pBLEScan->setMaxResults( 1 ); // Only store last device found
-	pBLEScan->start( 0, nullptr, false );
+	pBLEScan->setMaxResults( 0 );
+	pBLEScan->start( 0, false, true );
 
 	Serial.println( "Application started" );
 
@@ -505,13 +513,13 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 {
 	BLEScan* pBLEScan = BLEDevice::getScan();
 
-	BLEAddress bleAddress( BLECommand->Address );
+	const BLEAddress bleAddress( BLECommand->Address );
 	Serial.printf( "Sending command to BLE device: %s\n", BLECommand->Address );
 
 	NimBLEScanResults results = pBLEScan->getResults();
 
 	// Get the device (might be null if not found)
-	NimBLEAdvertisedDevice* pDevice = results.getDevice( bleAddress );
+	const NimBLEAdvertisedDevice* pDevice = results.getDevice( bleAddress );
 
 	if ( pDevice )
 	{
