@@ -29,9 +29,9 @@
 #include "BLE_Device.h"
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.4";
+const char* version = "Hello! SwitchBot BLE Hub V2.5";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.4</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.5</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -136,11 +136,11 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 		}
 	};	  // onResult
 
-  // void onScanEnd(const NimBLEScanResults& results, int reason) override
-  // {
-  //       Serial.printf("Scan ended reason = %d; restarting scan\n", reason);
-  //       NimBLEDevice::getScan()->start(scanTime, false, true);
-  //   }
+  void onScanEnd(const NimBLEScanResults& results, int reason) override
+  {
+        Serial.printf("Scan ended reason = %d; restarting scan\n", reason);
+        NimBLEDevice::getScan()->start(scanTime, false, true);
+    }
 };		  // MyAdvertisedDeviceCallbacks
 
 void setup()
@@ -696,4 +696,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 	{
 		Serial.println( "Device not found" );
 	}
+
+	Serial.println( "Restarting BLE scan" );
+  pBLEScan->start(0, true, false);
 }
