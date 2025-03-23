@@ -17,7 +17,7 @@
 */
 #include <ArduinoJson.h>
 #include <AsyncUDP.h>				// https://github.com/espressif/arduino-esp32/tree/master/libraries/AsyncUDP
-#include <ESPAsyncWebServer.h>		// https://github.com/me-no-dev/ESPAsyncWebServer
+#include <ESPAsyncWebServer.h>		// https://github.com/ESP32Async/ESPAsyncWebServer
 #include <ESPAsyncWiFiManager.h>	// https://github.com/alanswx/ESPAsyncWiFiManager
 #include <HTTPClient.h>
 #include <NimBLEDevice.h>	 // https://github.com/h2zero/NimBLE-Arduino/blob/master/docs/New_user_guide.md
@@ -513,7 +513,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 {
 	BLEScan* pBLEScan = BLEDevice::getScan();
 
-	const BLEAddress bleAddress( BLECommand->Address );
+	const BLEAddress bleAddress( BLECommand->Address, 0 );
 	Serial.printf( "Sending command to BLE device: %s\n", BLECommand->Address );
   uint64_t requestAddress = bleAddress;
 
