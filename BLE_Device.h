@@ -225,6 +225,7 @@ class CommandQ
 	CommandQ();
 	~CommandQ();
 
+  bool Find( String Address, String Data );
 	bool Push( String Address, String Data, String ReplyTo );
 	bool Pop( BLE_COMMAND* pBLE_Command );
 };

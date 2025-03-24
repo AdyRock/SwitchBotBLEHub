@@ -1413,6 +1413,30 @@ CommandQ::~CommandQ()
 {
 }
 
+// Searche the queue to see if that request is already there
+bool CommandQ::Find( String Address, String Data )
+{
+  for (int i = 0; i < NumQd; i++)
+  {
+  	BLE_COMMAND* entry = &Callbacks[ i ];
+		if (strncmp( entry->Address, Address.c_str(), 18 ) != 0)
+    {
+      // No match so check next entry
+      continue;
+    }
+
+		if (memcmp( entry->Data, Data.c_str(), entry->DataLen ) != 0)
+    {
+      // No match so check next entry
+      continue;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
 bool CommandQ::Push( String Address, String Data, String ReplyTo )
 {
 	if ( NumQd < QSize )

@@ -29,9 +29,9 @@
 #include "BLE_Device.h"
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.5";
+const char* version = "Hello! SwitchBot BLE Hub V2.7";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.5</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.7</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -50,6 +50,7 @@ char macAddress[ 18 ];
 unsigned long sendBroadcast = 0;
 uint8_t BLENotifyData[ 50 ];
 int BLENotifyLength = 0;
+uint32_t BLESending = 0;
 bool RebootRequired = false;
 int32_t NumUpdates = 0;
 
@@ -164,6 +165,16 @@ void setup()
 	server.on( "/", handleRoot );
 
 	sendBroadcast = millis();
+  server.onNotFound([](AsyncWebServerRequest* request) {
+    if ((request->url() == "/api/v1/callback/add") || (request->url() == "/api/v1/callback/remove") || (request->url() == "/api/v1/device/write"))
+      return; // response object already created by onRequestBody
+
+    String url = request->url();
+    Serial.printf( "Callback %s not found\n", url.c_str() );
+
+    request->send(404, "text/plain", "Not found");
+  });
+
 	server.onRequestBody(
 		[]( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total )
 		{
@@ -173,6 +184,7 @@ void setup()
 
 				if ( request->url() == "/api/v1/callback/add" )
 				{
+          Serial.println( "Received request for callback add" );
 					const size_t JSON_DOC_SIZE = 512U;
 					DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
 
@@ -181,26 +193,30 @@ void setup()
 						JsonObject callbackAddress = jsonDoc.as< JsonObject >();
 						if ( OurCallbacks.Add( callbackAddress[ "uri" ], millis() ) )
 						{
-							char Buf[ 100 ];
-							int bytes = snprintf( Buf, 100, "OK: %i", BLE_Devices.GetNumberOfDevices() );
+							//char Buf[ 100 ];
+							//int bytes = snprintf( Buf, 100, "OK: %i", BLE_Devices.GetNumberOfDevices() );
 
-							String msg = Buf;
+							String msg = "OK"; //Buf;
 							request->send( 200, "text/plain", msg );
+              Serial.println( "Callback added" );
 						}
 						else
 						{
 							String msg = "Too Many Requests";
 							request->send( 429, "text/plain", msg );
+              Serial.println( "Callback error 429" );
 						}
 					}
 					else
 					{
 						String msg = "Bad Request";
 						request->send( 400, "text/plain", msg );
+            Serial.println( "Callback error 400" );
 					}
 				}
 				else if ( request->url() == "/api/v1/callback/remove" )
 				{
+          Serial.println( "Received request for callback remove" );
 					const size_t JSON_DOC_SIZE = 512U;
 					DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
 
@@ -240,7 +256,13 @@ void setup()
 							String sourcIP	   = request->client()->remoteIP().toString();
 							Serial.printf( "Received request to write device %s with %s (%i) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length(), sourcIP.c_str() );
 
-							if ( BLECommandQ.Push( clientAddress, dataToWrite, sourcIP ) )
+							if (BLECommandQ.Find( clientAddress, dataToWrite ))
+              {
+                // Same command already queued
+								request->send( 200, "text/plain", "OK" );
+								Serial.println( "Command already in the Q" );
+              }
+              else if ( BLECommandQ.Push( clientAddress, dataToWrite, sourcIP ) )
 							{
 								request->send( 200, "text/plain", "OK" );
 							}
@@ -407,14 +429,17 @@ void loop()
 			}
 		}
 
-		// Check if there is a BLE command to send
-		BLE_COMMAND BLECommand;
-		if ( BLECommandQ.Pop( &BLECommand ) )
-		{
-			digitalWrite( led, 1 );
-			WriteToBLEDevice( &BLECommand );
-			digitalWrite( led, 0 );
-		}
+		if (millis() >= BLESending)
+    {
+      // Check if there is a BLE command to send
+      BLE_COMMAND BLECommand;
+      if ( BLECommandQ.Pop( &BLECommand ) )
+      {
+        digitalWrite( led, 1 );
+        WriteToBLEDevice( &BLECommand );
+        digitalWrite( led, 0 );
+      }
+    }
 
 		if ( BLE_Devices.HasChanged() )
 		{
@@ -699,4 +724,5 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
 	Serial.println( "Restarting BLE scan" );
   pBLEScan->start(0, true, false);
+  BLESending = millis() + 1000;
 }
