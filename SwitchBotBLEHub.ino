@@ -296,10 +296,10 @@ void setup()
             digitalWrite( led, 1 );
 
             Serial.println( "Received request for devices" );
-            char* buf = ( char* ) malloc( 4096 );
+            char* buf = ( char* ) malloc( 8192 );
             if (buf)
             {
-              BLE_Devices.AllToJson( buf, 4096, false, macAddress );
+              BLE_Devices.AllToJson( buf, 8192, false, macAddress );
               Serial.println( buf );
               request->send( 200, "application/json", buf );
               free( buf );

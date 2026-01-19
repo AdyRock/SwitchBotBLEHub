@@ -22,14 +22,15 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-typedef struct BLE_COMMAND
+struct BLE_COMMAND
 {
 	char Address[ 18 ];
 	char ReplyTo[ 50 ];
 	uint8_t Data[ 20 ];
 	int8_t DataLen;
 };
-typedef struct BLE_DEVICE
+
+struct BLE_DEVICE
 {
 	char MAC[ 18 ];
 	int rssi;
@@ -119,11 +120,12 @@ struct SWICHBOT_CO2
 };
 
 
-typedef struct SWITCHBOT
+struct SWITCHBOT
 {
 	char MAC[ 18 ];
 	int rssi;
 	char model;
+	uint8_t modelTriByte[ 3 ];
 	union
 	{
 		struct SWICHBOT_BOT bot;
@@ -151,6 +153,7 @@ class BLE_Device
 	bool parseBlind( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+	bool parsePresence2( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device );

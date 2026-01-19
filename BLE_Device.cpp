@@ -64,6 +64,12 @@
 #define METERPROCO2_DATA_SIZE 16
 #define METERPROCO2_DATA_ID	'5'
 
+#define USE_LONG_DATA_ID	0
+
+#define PRESENCE2_DATA_SIZE 14
+uint8_t PRESENCE2_DATA_LONG_ID1[ 3 ] = {0x00, 0xcc, 0xc8};
+uint8_t PRESENCE2_DATA_LONG_ID2[ 3 ] = {0x10, 0xcc, 0xc8};
+
 void printHex( uint8_t* data, uint8_t len )
 {
 	char buf[ 100 ];
@@ -131,6 +137,27 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 				return true;
 			}
 			expected_size = METERPROCO2_DATA_SIZE - 1;
+			break;
+
+		case USE_LONG_DATA_ID:
+			if (BLEDataSize >= 7)
+			{
+				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
+					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
+				{
+					if ( ManufactureDataSize >= PRESENCE2_DATA_SIZE - 1 )
+					{
+						return true;
+					}
+					expected_size = PRESENCE2_DATA_SIZE - 1;
+				}
+				else
+				{
+					// Serial.printf( "Unknown tribyte type %X, %X, %X\n", BLEData[4], BLEData[5], BLEData[6] );
+					// printHex( BLEData, BLEDataSize );
+					return false;
+				}
+			}
 			break;
 
 		default:
@@ -271,8 +298,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 							uint8_t BLEDataSize, uint8_t* ManufactureData,
 							uint8_t ManufactureDataSize )
 {
-	if ( !ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData,
-						ManufactureDataSize ) )
+	if ( !ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ) )
 	{
 		// Wrong type or wrong data size
 		return false;
@@ -283,8 +309,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 	if ( i >= 0 )
 	{
 		// Device already in the array so just update it
-		if ( CompareDevice( i, rssi, BLEData, BLEDataSize, ManufactureData,
-							ManufactureDataSize ) )
+		if ( CompareDevice( i, rssi, BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ) )
 		{
 			// They are the same
 			//            Serial.printf( "Matched %s\n", MAC );
@@ -292,8 +317,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		}
 
 		// Update the existing device
-		UpdateDevice( i, rssi, BLEData, BLEDataSize, ManufactureData,
-					  ManufactureDataSize );
+		UpdateDevice( i, rssi, BLEData, BLEDataSize, ManufactureData, ManufactureDataSize );
 		return true;
 	}
 
@@ -312,8 +336,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		case BULB_DATA_ID:
 		{
 			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData,
-					ManufactureDataSize );
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
 			BLE_devices[ NumDevices ].Data[ 0 ] = BULB_DATA_ID;
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
 			break;
@@ -322,8 +345,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		case IOTH_DATA_ID:
 		{
 			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData,
-					ManufactureDataSize );
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
 			BLE_devices[ NumDevices ].Data[ 0 ] = IOTH_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
@@ -333,8 +355,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		case WATERLEAK_DATA_ID:
 		{
 			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData,
-					ManufactureDataSize );
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
 			BLE_devices[ NumDevices ].Data[ 0 ] = WATERLEAK_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
@@ -343,8 +364,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		case METERPRO_DATA_ID:
 		{
 			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData,
-					ManufactureDataSize );
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
 			BLE_devices[ NumDevices ].Data[ 0 ] = METERPRO_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
@@ -353,8 +373,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		case METERPROCO2_DATA_ID:
 		{
 			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData,
-					ManufactureDataSize );
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
 			BLE_devices[ NumDevices ].Data[ 0 ] = METERPROCO2_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
@@ -362,6 +381,25 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 
 		default:
 		{
+			// Check for 3 byte identifier
+			if (BLEDataSize >= 7)
+			{
+				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
+					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
+				{
+					// Presence (mmWave)
+					memcpy( BLE_devices[ NumDevices ].Data + 4, ManufactureData, ManufactureDataSize );
+
+					// The first 4 bytes store the device tri-byte type and tr-byte identifier
+					BLE_devices[ NumDevices ].Data[ 0 ] = USE_LONG_DATA_ID;
+					BLE_devices[ NumDevices ].Data[ 1 ] = BLEData[ 4 ];
+					BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 5 ];
+					BLE_devices[ NumDevices ].Data[ 3 ] = BLEData[ 6 ];
+					BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 4;
+					printf( "added presence mm: Data size = %i\n", BLE_devices[ NumDevices ].DataSize);
+					break;
+				}
+			}
 			memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
 			BLE_devices[ NumDevices ].DataSize = BLEDataSize;
 		}
@@ -394,6 +432,15 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
     case METERPROCO2_DATA_ID:
 		{
 			if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 1 )
+			{
+				// Different manufacture data size
+				return false;
+			}
+			break;
+		}
+		case USE_LONG_DATA_ID:
+		{
+			if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 4 )
 			{
 				// Different manufacture data size
 				return false;
@@ -510,6 +557,28 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 			break;
 		}
 
+		case USE_LONG_DATA_ID:
+		{
+			// Check for 3 byte identifier
+			if (BLEDataSize >= 7)
+			{
+				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
+					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
+				{
+					// Presence (mmWave)
+					if (( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 9 + 4 ] ) ||
+							( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 10 + 4 ] ) ||
+							( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 12 + 4 ] ) ||
+							( ManufactureData[ 13 ] != BLE_devices[ Index ].Data[ 13 + 4 ] ))
+					{
+						return false;
+					}
+				}
+
+				break;
+			}
+		}
+
 		default:
 			return ( memcmp( BLE_devices[ Index ].Data, BLEData,
 							 BLE_devices[ Index ].DataSize ) == 0 );
@@ -544,6 +613,20 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 			break;
 		}
 
+		case USE_LONG_DATA_ID:
+		{
+			if (BLEDataSize >= 7)
+			{
+				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
+					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
+				{
+					memcpy( BLE_devices[ Index ].Data + 4, ManufactureData, ManufactureDataSize );
+					BLE_devices[ Index ].DataSize	= ManufactureDataSize + 4;
+					break;
+				}
+			}
+		}
+
 		default:
 		{
 			memcpy( BLE_devices[ Index ].Data, BLEData, BLEDataSize );
@@ -569,6 +652,7 @@ bool BLE_Device::GetSWDevice( uint8_t Index, SWITCHBOT& Device )
 		if ( !parseDevice( BLE_devices[ Index ], Device ) )
 		{
 			Serial.printf( "Failed to parse device %i\n", Index );
+			return false;
 		}
 		return true;
 	}
@@ -747,11 +831,30 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 								   "{\"model\":\"%c\",\"modelName\":\"MeterPro(CO2)\","
 								   "\"temperature\":{\"c\": "
 								   "%0.1f},\"battery\":%i,\"humidity\":%i, \"co2\":%i}}",
-								   Device.model, Device.thermometer.temperature,
+								   Device.model, Device.MeterProCO2.temperature,
 								   Device.MeterProCO2.battery,
 								   Device.MeterProCO2.humidity,
                    Device.MeterProCO2.co2 );
 
+				break;
+			}
+
+			case USE_LONG_DATA_ID:
+			{
+				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == Device.modelTriByte[ 0 ]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == Device.modelTriByte[ 2 ]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == Device.modelTriByte[ 2 ])) ||
+					((PRESENCE2_DATA_LONG_ID2[ 0 ] == Device.modelTriByte[ 0 ]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == Device.modelTriByte[ 1 ]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == Device.modelTriByte[ 2 ])))
+				{
+					bytes += snprintf( Buf + bytes, BufSize - bytes,
+										"{\"model\":\"Presence\",\"modelName\":\"Presence(mm)\","
+										"\"presence\":%i,\"battery\":%i,\"light\":%i}}",
+										Device.Presence.motion,
+										Device.Presence.battery, Device.Presence.light );
+				}
+				else
+				{
+					bytes += snprintf( Buf + bytes, BufSize - bytes,
+										"{\"error\": \"Unknown model %X, %X, %X\"}}", Device.modelTriByte[0], Device.modelTriByte[1], Device.modelTriByte[2] );
+				}
 				break;
 			}
 
@@ -922,9 +1025,20 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		{
 			return parseMeterProCO2( Device, SW_Device );
 		}
+
+		case USE_LONG_DATA_ID:
+		{
+				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == Device.Data[1]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == Device.Data[ 2 ]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == Device.Data[ 3 ])) ||
+					((PRESENCE2_DATA_LONG_ID2[ 0 ] == Device.Data[ 1 ]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == Device.Data[ 2 ]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == Device.Data[ 3 ])))
+				{
+					return parsePresence2( Device, SW_Device );
+				}
+				Serial.printf( "Failed to parse device: Unrecognised device tri-type: %X, %X, %X\n", Device.Data[1], Device.Data[2], Device.Data[3]);
+				return false;
+		}
 	}
 
-	Serial.println( "Failed to parse device: Unrecognised device type" );
+	Serial.printf( "Failed to parse device: Unrecognised device type: %X", Device.Data[ 0 ] );
 	return false;
 }
 
@@ -1093,6 +1207,30 @@ bool BLE_Device::parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	return true;
 }
 
+bool BLE_Device::parsePresence2( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+	if ( Device.DataSize != PRESENCE2_DATA_SIZE + 4 )
+	{
+		return false;
+	}
+	SW_Device.modelTriByte[ 0 ] = Device.Data[ 1 ];
+	SW_Device.modelTriByte[ 1 ] = Device.Data[ 2 ];
+	SW_Device.modelTriByte[ 2 ] = Device.Data[ 3 ];
+
+	uint8_t byte7 = Device.Data[ 7 + 4 + 2 ];
+	uint8_t byte11 = Device.Data[ 11 + 4 + 2 ];
+	
+	SW_Device.Presence.light   = ( byte11 & 0x1F );
+	SW_Device.Presence.motion  = ( ( byte7 & 0x40 ) != 0 );
+	SW_Device.Presence.battery = ( (byte7 >> 2) & 0x03 );
+
+	// Serial.printf( "Presence: MAC = %s, motion = %i, light = %i, battery =
+	// %i\n", Device.MAC, SW_Device.Presence.motion, SW_Device.Presence.light,
+	// SW_Device.Presence.battery );
+
+	return true;
+}
+
 bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
 	if ( Device.DataSize != CONTACT_DATA_SIZE )
@@ -1187,9 +1325,11 @@ bool BLE_Device::parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		return false;
 	}
 
+	uint8_t byte2  = Device.Data[ 2 ];
 	uint8_t byte10 = Device.Data[ 11 ];
 
 	SW_Device.WaterLeak.status = ( byte10 & 0x01 );
+	SW_Device.WaterLeak.battery  = ( byte2 & 0b01111111 );
 
 	// Serial.printf( "Water Leak: MAC = %s, StatUS = %i\n", Device.MAC,
 	// SW_Device.WaterLeak.Status );
@@ -1353,6 +1493,7 @@ bool ClientCallbacks::Remove( uint8_t Index )
 	}
 
 	NumCallbacks--;
+	return true;
 }
 
 bool ClientCallbacks::Remove( const char* url )
