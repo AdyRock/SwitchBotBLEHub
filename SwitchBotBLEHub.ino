@@ -170,7 +170,8 @@ void setup()
       return; // response object already created by onRequestBody
 
     String url = request->url();
-    Serial.printf( "Callback %s not found\n", url.c_str() );
+		String clientIP = request->client()->remoteIP().toString();
+    Serial.printf( "API funtion %s not found from %s\n", url.c_str(), clientIP.c_str() );
 
     request->send(404, "text/plain", "Not found");
   });
@@ -184,7 +185,7 @@ void setup()
 
 				if ( request->url() == "/api/v1/callback/add" )
 				{
-          Serial.println( "Received request for callback add" );
+          Serial.println( "Received request for /api/v1/callback/add" );
 					const size_t JSON_DOC_SIZE = 512U;
 					DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
 
@@ -198,7 +199,6 @@ void setup()
 
 							String msg = "OK"; //Buf;
 							request->send( 200, "text/plain", msg );
-              Serial.println( "Callback added" );
 						}
 						else
 						{
@@ -216,7 +216,7 @@ void setup()
 				}
 				else if ( request->url() == "/api/v1/callback/remove" )
 				{
-          Serial.println( "Received request for callback remove" );
+          Serial.println( "Received request for /api/v1/callback/remove" );
 					const size_t JSON_DOC_SIZE = 512U;
 					DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
 
@@ -662,7 +662,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 												}
 												else
 												{
-													Serial.printf( "Callback URL %s not found\n", BLECommand->ReplyTo );
+													Serial.printf( "Callback URL %s not found (1)\n", BLECommand->ReplyTo );
 												}
 
 												free( replyAddress );
@@ -680,7 +680,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 									}
 									else
 									{
-										Serial.printf( "Callback URL %s not found\n", BLECommand->ReplyTo );
+										Serial.printf( "Callback URL %s not found (2)\n", BLECommand->ReplyTo );
 									}
 
 									free( replyBuf );
@@ -719,7 +719,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 	}
 	else
 	{
-		Serial.println( "Device not found" );
+		Serial.println( "Device not found (3)" );
 	}
 
 	Serial.println( "Restarting BLE scan" );

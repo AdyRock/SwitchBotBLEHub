@@ -1423,7 +1423,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
 		return false;
 	}
 
-	// Serial.printf( "Request to add: %s\n", url );
+	Serial.printf( "Request to add: %s\n", url );
 
 	for ( uint8_t i = 0; i < NumCallbacks; i++ )
 	{
@@ -1441,7 +1441,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
 	strcpy( Callbacks[ NumCallbacks ].url, url );
 	NumCallbacks++;
 
-	// Serial.printf( "Request OK, URI %s has been added.\n", url );
+	Serial.printf( "Request OK, URI %s has been added.\n", url );
 
 	return true;
 }
