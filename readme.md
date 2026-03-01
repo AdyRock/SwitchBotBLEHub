@@ -41,11 +41,11 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
 6. You will need to install the following libraries into your system from the Sketch - Include Library menu:
 
     ```html
-    ArduinoJson by Benoit Blanchon version 0.1.2
-    NimBLE-Arduino by h2zero version 2.0.0
+    ArduinoJson by Benoit Blanchon version 7.4.2
+    NimBLE-Arduino by h2zero version 2.3.7
     ESPAsyncHTTPUpdateServer 2.0.0
-    ESP Async WebServer 3.7.4
-    AsyncTCP version 3.3.6
+    ESP Async WebServer 3.9.4
+    AsyncTCP version 3.4.10
     ```
 
 7. Install the follwing packages from the internet:
@@ -61,7 +61,9 @@ Learn more: <https://www.amazon.co.uk/dp/B08DR5T897/ref=cm_sw_em_r_mt_dp_1JMZDAY
 
 ## Installation Method 2 via the Flash downloader
 
-1. Download the SwitchBotBLEHub.ino.merged.bin file from the build/esp32.esp32.esp32 folder
+# Note: there are now two binaries, one for the ESP32 and the other is for the ESP32-S3
+
+1. Download the SwitchBotBLEHub.ino.merged.bin file from the build/esp32.esp32.esp32 folder or the esp32.esp32.esp32s3 folder
 
 2. Download the Flash Downloads Tool from https://www.espressif.com/en/support/download/other-tools
 
@@ -104,7 +106,7 @@ Once the board is up and running, take it to a location that is withing range of
 
 The board also supports Over The Air updates so future updates can be sent directly to the board. 
 
-Download the SwitchBotBLEHub.ino.bin file from https://github.com/AdyRock/SwitchBotBLEHub/tree/master/build/esp32.esp32.esp32.
+Download the SwitchBotBLEHub.ino.bin file from https://github.com/AdyRock/SwitchBotBLEHub/tree/master/build/esp32.esp32.esp32 or https://github.com/AdyRock/SwitchBotBLEHub/tree/master/build/esp32.esp32.esp32s3
 
 Open a browser on a computer connected to the same network as the board. Navigate to http://board_ip_address/update
 
