@@ -555,7 +555,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 	}
 
 	pBLEScan->stop();
-	delay( 200 );
+	delay( 100 );
 
 	// Get the device (might be null if not found)
 	//	const NimBLEAdvertisedDevice* pDevice = results.getDevice( bleAddress );
@@ -599,7 +599,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
 							if ( rn )
 							{
-								// Serial.println( "Registering notification" );
+								Serial.println( "Registering notification" );
 								BLENotifyLength = 0;
 								if ( !rn->subscribe( true, notifyCallback ) )
 								{
@@ -611,12 +611,11 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 						rc->writeValue( BLECommand->Data, BLECommand->DataLen );
 						Serial.println( "Data sent" );
 
-						if ( rc )
+						if ( rn )
 						{
 							Serial.println( "Waiting for notification" );
 							unsigned long endTime = millis() + 2000;
-							while ( ( BLENotifyLength == 0 ) && ( millis() < endTime ) )
-								;
+							while ( ( BLENotifyLength == 0 ) && ( millis() < endTime ) );
 							if ( BLENotifyLength > 0 )
 							{
 								Serial.println( "Got notification" );
@@ -693,11 +692,8 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 								}
 							}
 
-							if ( rn )
-							{
-								Serial.println( "Waiting for notification" );
-								rn->unsubscribe();
-							}
+							Serial.println( "Unsubscribe from notification" );
+							rn->unsubscribe();
 						}
 						complete = true;
 					}
