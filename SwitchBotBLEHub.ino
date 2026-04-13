@@ -29,9 +29,9 @@
 #include "BLE_Device.h"
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.8";
+const char* version = "Hello! SwitchBot BLE Hub V2.9";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.8</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.9</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 
@@ -53,6 +53,7 @@ int BLENotifyLength = 0;
 uint32_t BLESending = 0;
 bool RebootRequired = false;
 int32_t NumUpdates = 0;
+int32_t NumUpdatesAt0 = 0;
 
 // The remote service we wish to connect to.
 static BLEUUID serviceUUID( "cba20d00-224d-11e6-9fb8-0002a5d5c51b" );
@@ -409,6 +410,21 @@ void loop()
 			// Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
 			udp.printf( "SwitchBot BLE Hub! %s", macAddress );
 			sendBroadcast = millis() + 60000;
+
+			if (NumUpdates == 0)
+			{
+				NumUpdatesAt0++;
+			}
+			else
+			{
+				NumUpdatesAt0 = 0;
+			}
+
+			if (NumUpdatesAt0 > 3)
+			{
+				Serial.println( "No BLE updates for 3 minutes, rebooting" );
+				RebootRequired = true;
+			}
 
 			Serial.printf( "BLE updates %i per minute\n", NumUpdates );
 			NumUpdates = 0;
