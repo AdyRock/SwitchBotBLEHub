@@ -228,8 +228,8 @@ class CommandQ
 	CommandQ();
 	~CommandQ();
 
-  bool Find( String Address, String Data );
-	bool Push( String Address, String Data, String ReplyTo );
+	bool Find( const char* Address, const char* Data );
+	bool Push( const char* Address, const char* Data, const char* ReplyTo );
 	bool Pop( BLE_COMMAND* pBLE_Command );
 };
 

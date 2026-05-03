@@ -25,20 +25,223 @@
 #include <WiFiClient.h>
 // #include <ElegantOTA.h>           // https://github.com/ayushsharma82/ElegantOTA
 #include <ESPAsyncHTTPUpdateServer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include "BLE_Device.h"
+#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.9";
+const char* version = "Hello! SwitchBot BLE Hub V2.10";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <title>Home</title>\n  </head>\n  <body>\n    <h1><b>Welcome to the ESP32 SwitchBot BLE hub for Homey.</b></h1>\n    <p><i>Version 2.9</i></p>\n    <p><a href=\"/update\">Update the firmware</a></p>\n    <p><a href=\"/api/v1/devices\">View the registered devices</a></p>\n  </body>\n</html>\n";
+const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <title>SwitchBot BLE Hub</title>\n    <style>\n      body{margin:0;background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;}\n      .wrap{max-width:760px;margin:2rem auto;padding:0 1rem;}\n      .card{background:#252526;border:1px solid #3c3c3c;border-radius:10px;padding:1.25rem 1.1rem;}\n      h1{margin:0 0 .25rem;color:#9cdcfe;font-size:1.55rem;}\n      .ver{margin:0 0 1.1rem;color:#a0a0a0;font-size:.95rem;}\n      .links{display:grid;gap:.7rem;}\n      a.btn{display:block;text-decoration:none;background:#007acc;color:#fff;padding:.7rem .8rem;border-radius:6px;font-weight:600;}\n      a.btn:hover{background:#005f9e;}\n    </style>\n  </head>\n  <body>\n    <div class=\"wrap\">\n      <div class=\"card\">\n        <h1>SwitchBot BLE Hub</h1>\n        <p class=\"ver\">Version 2.10</p>\n        <div class=\"links\">\n          <a class=\"btn\" href=\"/update\">Update firmware</a>\n          <a class=\"btn\" href=\"/api/v1/devices\">View registered devices (JSON)</a>\n          <a class=\"btn\" href=\"/api/v1/devices/table\">View registered devices (table)</a>\n        </div>\n      </div>\n    </div>\n  </body>\n</html>\n";
+
+const char DEVICES_TABLE_HTML[] PROGMEM = R"HTML(
+<!DOCTYPE html><html><head>
+<meta charset='UTF-8'><title>Devices</title>
+<style>
+body{font-family:sans-serif;background:#1e1e1e;color:#d4d4d4;margin:1rem 2rem;}
+h2{color:#9cdcfe;margin-top:1.8rem;margin-bottom:0.4rem;border-bottom:1px solid #3c3c3c;padding-bottom:4px;}
+table{border-collapse:collapse;margin-bottom:0.5rem;font-size:0.85rem;}
+th{background:#007acc;color:#fff;padding:6px 10px;text-align:left;white-space:nowrap;cursor:pointer;user-select:none;}
+th:hover{background:#005f9e;}
+td{padding:5px 10px;border-bottom:1px solid #3c3c3c;white-space:nowrap;}
+tr:nth-child(even){background:#252526;}
+tr:hover td{background:#2d2d2d;}
+#stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0.6rem;margin:1rem 0;}
+.stat{background:#252526;border:1px solid #3c3c3c;border-radius:6px;padding:0.5rem 0.6rem;}
+.stat .k{font-size:0.75rem;color:#9aa0a6;}
+.stat .v{font-size:1rem;color:#d4d4d4;font-weight:600;}
+#refresh{margin-bottom:1rem;padding:6px 14px;background:#007acc;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.9rem;}
+#refresh:hover{background:#005f9e;}
+#ts{margin-left:1rem;font-size:0.8rem;color:#888;}
+</style></head><body>
+<h1 style='color:#9cdcfe'>Registered Devices</h1>
+<button id='refresh' onclick='refreshAll()'>&#8635; Refresh</button>
+<span id='ts'></span><span id='live' style='margin-left:1rem;font-size:0.8rem;color:#555'>&#9679; connecting...</span>
+<div id='stats'></div>
+<div id='tbl'></div>
+<script>
+var groups={};
+var sortPrefs={};
+var statsTimer=null;
+var lastStats=null;
+var statsClockOffsetMs=0;
+var nextStatsServerMs=0;
+var waitingStatsRefresh=false;
+function mkStat(k,v){return '<div class=stat><div class=k>'+k+'</div><div class=v>'+v+'</div></div>';}
+function getStatsRemainingSeconds(){
+	if(nextStatsServerMs<=0)return '--';
+	var serverNowMs=Date.now()-statsClockOffsetMs;
+	var rem=Math.ceil((nextStatsServerMs-serverNowMs)/1000);
+	if(rem<0)rem=0;
+	return rem;
+}
+function renderStats(s){
+	var h='';
+	h+=mkStat('Updates/min',s.updatesPerMinute);
+	h+=mkStat('Next stats refresh',getStatsRemainingSeconds()+'s');
+	h+=mkStat('Free heap',s.freeHeapNow);
+	h+=mkStat('Largest block',s.largestHeapBlockNow);
+	h+=mkStat('Heap min',s.heapMin);
+	h+=mkStat('Heap max',s.heapMax);
+	h+=mkStat('Largest min',s.heapLargestMin);
+	h+=mkStat('Uptime',Math.floor((s.uptimeMs||0)/1000)+'s');
+	document.getElementById('stats').innerHTML=h;
+}
+function startStatsTimer(){
+	if(statsTimer!==null)return;
+	statsTimer=setInterval(function(){
+		if(lastStats){
+			if(getStatsRemainingSeconds()===0&&!waitingStatsRefresh){
+				waitingStatsRefresh=true;
+			loadStats();
+			}
+			renderStats(lastStats);
+		}
+	},1000);
+}
+function loadStats(){
+	fetch('/api/v1/stats',{headers:{Accept:'application/json'}})
+	.then(function(r){return r.json();})
+	.then(function(s){
+		lastStats=s;
+		statsClockOffsetMs=Date.now()-(s.uptimeMs||0);
+		nextStatsServerMs=(s.lastStatsAtMs||0)+60000;
+		waitingStatsRefresh=false;
+		renderStats(s);
+	})
+	.catch(function(){document.getElementById('stats').innerHTML='';});
+}
+function sortRows(rows,k,asc){
+	rows.sort(function(a,b){
+		var av=a[k]===undefined?'':a[k],bv=b[k]===undefined?'':b[k];
+		if(!isNaN(av)&&!isNaN(bv)){av=+av;bv=+bv;}
+		return asc?(av>bv?1:av<bv?-1:0):(av<bv?1:av>bv?-1:0);
+	});
+}
+function flatten(d){
+	var o={address:d.address,rssi:d.rssi};
+	var s=d.serviceData||{};
+	Object.keys(s).forEach(function(k){
+		if(k==='model')return;
+		var v=s[k];
+		if(v!==null&&typeof v==='object'){
+			Object.keys(v).forEach(function(sk){o[k+'_'+sk]=v[sk];});
+		} else {o[k]=v;}
+	});
+	return o;
+}
+function buildCols(rows){
+	var seen={};
+	rows.forEach(function(r){Object.keys(r).forEach(function(k){seen[k]=true;});});
+	var fixed=['address','rssi'];
+	var rest=Object.keys(seen).filter(function(k){return fixed.indexOf(k)<0&&k!=='modelName';}).sort();
+	return fixed.concat(rest);
+}
+function renderGroup(name,g){
+	var cols=buildCols(g.rows);
+	var h='<table id="t_'+name+'">';
+	h+='<thead><tr>';
+	cols.forEach(function(c,i){
+		var arrow=(g.sortCol===i)?(g.sortAsc?' &#9650;':' &#9660;'):'';
+		h+='<th onclick="sortGroup(\''+name+'\','+i+')">'+c.replace(/_/g,' ')+arrow+'</th>';
+	});
+	h+='</tr></thead><tbody>';
+	g.rows.forEach(function(r){
+		h+='<tr>';
+		cols.forEach(function(c){
+			var v=r[c];
+			if(v===undefined||v===null){h+='<td style="color:#555">-</td>';}
+			else if(typeof v==='boolean'){h+='<td>'+(v?'yes':'no')+'</td>';}
+			else{h+='<td>'+v+'</td>';}
+		});
+		h+='</tr>';
+	});
+	h+='</tbody></table>';
+	return h;
+}
+function render(){
+	var names=Object.keys(groups).sort();
+	if(!names.length){document.getElementById('tbl').innerHTML='<p>No devices found.</p>';return;}
+	var h='';
+	names.forEach(function(name){
+		h+='<h2>'+name+' ('+groups[name].rows.length+')</h2>';
+		h+=renderGroup(name,groups[name]);
+	});
+	document.getElementById('tbl').innerHTML=h;
+}
+function sortGroup(name,i){
+	var g=groups[name];
+	if(g.sortCol===i){g.sortAsc=!g.sortAsc;}else{g.sortCol=i;g.sortAsc=true;}
+	var cols=buildCols(g.rows);
+	var k=cols[i];
+	sortRows(g.rows,k,g.sortAsc);
+	sortPrefs[name]={sortCol:g.sortCol,sortAsc:g.sortAsc};
+	render();
+}
+function load(){
+	fetch('/api/v1/devices',{headers:{Accept:'application/json'}})
+	.then(function(r){return r.json();})
+	.then(function(data){
+		groups={};
+		data.forEach(function(d){
+			var f=flatten(d);
+			var name=f.modelName||'Unknown';
+			if(!groups[name]){groups[name]={rows:[],sortCol:-1,sortAsc:true};}
+			groups[name].rows.push(f);
+		});
+		Object.keys(groups).forEach(function(name){
+			var pref=sortPrefs[name];
+			if(!pref)return;
+			var g=groups[name];
+			var cols=buildCols(g.rows);
+			if(pref.sortCol>=0&&pref.sortCol<cols.length){
+				g.sortCol=pref.sortCol;
+				g.sortAsc=pref.sortAsc;
+				sortRows(g.rows,cols[g.sortCol],g.sortAsc);
+			}
+		});
+		render();
+		document.getElementById('ts').textContent='Updated: '+new Date().toLocaleTimeString();
+	})
+	.catch(function(e){document.getElementById('tbl').innerHTML='<p style=color:red>Error: '+e+'</p>';});
+}
+function refreshAll(){load();loadStats();}
+refreshAll();
+startStatsTimer();
+var es=new EventSource('/api/v1/events');
+es.addEventListener('ble',function(){load();});
+es.addEventListener('stats',function(){loadStats();});
+es.onopen=function(){document.getElementById('live').style.color='#4ec94e';document.getElementById('live').textContent='\u25cf live';};
+es.onerror=function(){document.getElementById('live').style.color='#e05252';document.getElementById('live').textContent='\u25cf disconnected';};
+</script></body></html>
+)HTML";
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
+SemaphoreHandle_t callbackMutex = nullptr;
+
+static inline void lockCallbacks()
+{
+	if ( callbackMutex != nullptr )
+	{
+		xSemaphoreTake( callbackMutex, portMAX_DELAY );
+	}
+}
+
+static inline void unlockCallbacks()
+{
+	if ( callbackMutex != nullptr )
+	{
+		xSemaphoreGive( callbackMutex );
+	}
+}
 
 CommandQ BLECommandQ;
 AsyncWebServer server( 80 );
 DNSServer dns;
 AsyncUDP udp;
+AsyncEventSource bleEvents( "/api/v1/events" );
 
 ESPAsyncHTTPUpdateServer _updateServer;
 
@@ -54,6 +257,63 @@ uint32_t BLESending = 0;
 bool RebootRequired = false;
 int32_t NumUpdates = 0;
 int32_t NumUpdatesAt0 = 0;
+volatile int32_t LastUpdatesPerMinute = 0;
+volatile uint32_t LastFreeHeap = 0;
+volatile uint32_t LastLargestHeapBlock = 0;
+volatile uint32_t LastStatsAt = 0;
+volatile bool pendingSSEUpdate = false;
+volatile bool pendingSSEStats = false;
+unsigned long lastSSESend = 0;
+unsigned long lastSSEStatsSend = 0;
+
+uint32_t HeapTelemetryStart = 0;
+uint32_t HeapTelemetryLast = 0;
+uint32_t HeapTelemetryLastAt = 0;
+uint32_t HeapTelemetryMin = 0xFFFFFFFF;
+uint32_t HeapTelemetryMax = 0;
+uint32_t HeapTelemetryLargestMin = 0xFFFFFFFF;
+
+void ReportHeapTelemetry( bool force )
+{
+	const uint32_t now = millis();
+	if ( !force && ( now - HeapTelemetryLastAt < 30000UL ) )
+	{
+		return;
+	}
+
+	const uint32_t freeHeap = esp_get_free_heap_size();
+	const uint32_t largestFreeBlock = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
+
+	if ( freeHeap < HeapTelemetryMin )
+	{
+		HeapTelemetryMin = freeHeap;
+	}
+	if ( freeHeap > HeapTelemetryMax )
+	{
+		HeapTelemetryMax = freeHeap;
+	}
+	if ( largestFreeBlock < HeapTelemetryLargestMin )
+	{
+		HeapTelemetryLargestMin = largestFreeBlock;
+	}
+
+	const int32_t driftFromStart = ( int32_t )freeHeap - ( int32_t )HeapTelemetryStart;
+	const int32_t driftSinceLast = ( int32_t )freeHeap - ( int32_t )HeapTelemetryLast;
+
+	Serial.printf(
+		"[HEAP] now=%u start=%u driftStart=%ld drift30s=%ld min=%u max=%u largest=%u largestMin=%u\n",
+		freeHeap,
+		HeapTelemetryStart,
+		( long )driftFromStart,
+		( long )driftSinceLast,
+		HeapTelemetryMin,
+		HeapTelemetryMax,
+		largestFreeBlock,
+		HeapTelemetryLargestMin );
+
+	HeapTelemetryLast = freeHeap;
+	HeapTelemetryLastAt = now;
+}
 
 // The remote service we wish to connect to.
 static BLEUUID serviceUUID( "cba20d00-224d-11e6-9fb8-0002a5d5c51b" );
@@ -61,6 +321,10 @@ static BLEUUID serviceUUID( "cba20d00-224d-11e6-9fb8-0002a5d5c51b" );
 static BLEUUID charUUID( "cba20002-224d-11e6-9fb8-0002a5d5c51b" );
 // The characteristic of the notification service we are interested in.
 static BLEUUID notifyUUID( "cba20003-224d-11e6-9fb8-0002a5d5c51b" );
+
+int SendDeviceChange( const char* host, const char* data, int bytes );
+void SendChangedDevices();
+void WriteToBLEDevice( BLE_COMMAND* BLECommand );
 
 void handleRoot( AsyncWebServerRequest* request )
 {
@@ -130,6 +394,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 				NumUpdates++;
+				pendingSSEUpdate = true;
 			}
 			// else
 			// {
@@ -151,6 +416,11 @@ void setup()
 	digitalWrite( led, 0 );
 	Serial.begin( 921600 );
 	Serial.println( "Starting Arduino BLE Client application..." );
+	callbackMutex = xSemaphoreCreateMutex();
+	if ( callbackMutex == nullptr )
+	{
+		Serial.println( "Failed to create callback mutex" );
+	}
 
 	AsyncWiFiManager wifiManager( &server, &dns );
 	//    wifiManager.resetSettings();
@@ -164,6 +434,13 @@ void setup()
 	// BLEDevice::init( "" );
 
 	server.on( "/", handleRoot );
+
+	server.on( "/api/v1/devices/table", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+		Serial.println( "Received request for devices table" );
+		request->send_P( 200, "text/html", DEVICES_TABLE_HTML );
+		digitalWrite( led, 0 );
+	} );
 
 	sendBroadcast = millis();
 	server.onNotFound( []( AsyncWebServerRequest* request ) {
@@ -186,44 +463,42 @@ void setup()
 			    if ( request->url() == "/api/v1/callback/add" )
 			    {
 				    Serial.println( "Received request for /api/v1/callback/add" );
-				    const size_t JSON_DOC_SIZE = 512U;
-				    DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
+				    StaticJsonDocument<512> jsonDoc;
 
 				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
 				    {
 					    JsonObject callbackAddress = jsonDoc.as<JsonObject>();
-					    if ( OurCallbacks.Add( callbackAddress[ "uri" ], millis() ) )
+					    lockCallbacks();
+					    bool addOk = OurCallbacks.Add( callbackAddress[ "uri" ], millis() );
+					    unlockCallbacks();
+					    if ( addOk )
 					    {
-						    // char Buf[ 100 ];
-						    // int bytes = snprintf( Buf, 100, "OK: %i", BLE_Devices.GetNumberOfDevices() );
-
-						    String msg = "OK"; // Buf;
-						    request->send( 200, "text/plain", msg );
+						    request->send( 200, "text/plain", "OK" );
 					    }
 					    else
 					    {
-						    String msg = "Too Many Requests";
-						    request->send( 429, "text/plain", msg );
+						    request->send( 429, "text/plain", "Too Many Requests" );
 						    Serial.println( "Callback error 429" );
 					    }
 				    }
 				    else
 				    {
-					    String msg = "Bad Request";
-					    request->send( 400, "text/plain", msg );
+					    request->send( 400, "text/plain", "Bad Request" );
 					    Serial.println( "Callback error 400" );
 				    }
 			    }
 			    else if ( request->url() == "/api/v1/callback/remove" )
 			    {
 				    Serial.println( "Received request for /api/v1/callback/remove" );
-				    const size_t JSON_DOC_SIZE = 512U;
-				    DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
+				    StaticJsonDocument<512> jsonDoc;
 
 				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
 				    {
 					    JsonObject callbackAddress = jsonDoc.as<JsonObject>();
-					    if ( OurCallbacks.Remove( ( const char* )callbackAddress[ "uri" ] ) )
+					    lockCallbacks();
+					    bool removeOk = OurCallbacks.Remove( ( const char* )callbackAddress[ "uri" ] );
+					    unlockCallbacks();
+					    if ( removeOk )
 					    {
 						    request->send( 200, "text/plain", "OK" );
 					    }
@@ -234,27 +509,25 @@ void setup()
 				    }
 				    else
 				    {
-					    String msg = "Bad Request";
-					    request->send( 400, "text/plain", msg );
+					    request->send( 400, "text/plain", "Bad Request" );
 				    }
 			    }
 			    else if ( request->url() == "/api/v1/device/write" )
 			    {
-				    const size_t JSON_DOC_SIZE = 512U;
-				    DynamicJsonDocument jsonDoc( JSON_DOC_SIZE );
+				    StaticJsonDocument<512> jsonDoc;
 
 				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
 				    {
 					    JsonObject writeParameters = jsonDoc.as<JsonObject>();
-					    String clientAddress = writeParameters[ "address" ];
+					    const char* clientAddress = writeParameters[ "address" ] | "";
 
 					    // Check that we have seen that device
-					    int deviceIdx = BLE_Devices.FindDevice( clientAddress.c_str() );
+					    int deviceIdx = BLE_Devices.FindDevice( clientAddress );
 					    if ( deviceIdx >= 0 )
 					    {
-						    String dataToWrite = writeParameters[ "data" ];
+						    const char* dataToWrite = writeParameters[ "data" ] | "";
 							String sourcIP = IPAddress( request->client()->getRemoteAddress() ).toString();
-						    Serial.printf( "Received request to write device %s with %s (%i) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), dataToWrite.length(), sourcIP.c_str() );
+						    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress, dataToWrite, ( unsigned int )strlen( dataToWrite ), sourcIP.c_str() );
 
 						    if ( BLECommandQ.Find( clientAddress, dataToWrite ) )
 						    {
@@ -262,28 +535,25 @@ void setup()
 							    request->send( 200, "text/plain", "OK" );
 							    Serial.println( "Command already in the Q" );
 						    }
-						    else if ( BLECommandQ.Push( clientAddress, dataToWrite, sourcIP ) )
+						    else if ( BLECommandQ.Push( clientAddress, dataToWrite, sourcIP.c_str() ) )
 						    {
 							    request->send( 200, "text/plain", "OK" );
 						    }
 						    else
 						    {
-							    String msg = "Too Many Requests";
-							    request->send( 429, "text/plain", msg );
+							    request->send( 429, "text/plain", "Too Many Requests" );
 							    Serial.println( "I have too much in my command Q" );
 						    }
 					    }
 					    else
 					    {
-						    String msg = "Unknown device";
-						    request->send( 422, "text/plain", msg );
-						    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress.c_str() );
+						    request->send( 422, "text/plain", "Unknown device" );
+						    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress );
 					    }
 				    }
 				    else
 				    {
-					    String msg = "Bad Request";
-					    request->send( 400, "text/plain", msg );
+					    request->send( 400, "text/plain", "Bad Request" );
 				    }
 			    }
 
@@ -295,12 +565,66 @@ void setup()
 		digitalWrite( led, 1 );
 
 		Serial.println( "Received request for devices" );
+
+		// Decide whether the caller wants raw JSON (e.g. API clients that send
+		// Accept: application/json) or a pretty HTML page (browser).
+		bool wantJson = false;
+		if ( request->hasHeader( "Accept" ) )
+		{
+			String accept = request->getHeader( "Accept" )->value();
+			wantJson = ( accept.indexOf( "application/json" ) >= 0 &&
+						 accept.indexOf( "text/html" ) < 0 );
+		}
+
 		char* buf = ( char* )malloc( 8192 );
 		if ( buf )
 		{
 			BLE_Devices.AllToJson( buf, 8192, false, macAddress );
 			Serial.println( buf );
-			request->send( 200, "application/json", buf );
+
+			if ( wantJson )
+			{
+				request->send( 200, "application/json", buf );
+			}
+			else
+			{
+				// Build a small HTML page that pretty-prints the JSON in the browser.
+				// The raw JSON is embedded as a JS variable so no extra request is needed.
+				AsyncResponseStream* response = request->beginResponseStream( "text/html" );
+				response->print(
+					"<!DOCTYPE html><html><head>"
+					"<meta charset=\"UTF-8\">"
+					"<title>Registered Devices</title>"
+					"<style>"
+					"body{font-family:monospace;background:#1e1e1e;color:#d4d4d4;margin:1rem 2rem;}"
+					"h1{color:#9cdcfe;font-family:sans-serif;}"
+					"pre{background:#252526;border:1px solid #3c3c3c;border-radius:6px;"
+					"padding:1rem;white-space:pre-wrap;word-break:break-all;font-size:0.9rem;}"
+					".k{color:#9cdcfe;} .s{color:#ce9178;} .n{color:#b5cea8;} .b{color:#569cd6;}"
+					"</style></head><body>"
+					"<h1>Registered Devices</h1>"
+					"<pre id=\"out\"></pre>"
+					"<script>"
+					"var raw=" );
+				response->print( buf );
+				response->print(
+					";"
+					"function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}"
+					"function colorize(json){"
+					"return json.replace(/(&quot;(\\\\u[a-zA-Z0-9]{4}|\\\\[^u]|[^\\\\\"])*&quot;\\s*:?|\\b(true|false|null)\\b|-?\\d+(?:\\.\\d*)?(?:[eE][+\\-]?\\d+)?)/g,"
+					"function(m){"
+					"var c='n';"
+					"if(/^&quot;/.test(m)){c=/:$/.test(m)?'k':'s';}"
+					"else if(/true|false/.test(m)){c='b';}"
+					"else if(/null/.test(m)){c='b';}"
+					"return '<span class=\"'+c+'\">'+m+'</span>';});"
+					"}"
+					"document.getElementById('out').innerHTML=colorize(esc(JSON.stringify(raw,null,2)));"
+					"</script>"
+					"</body></html>" );
+				request->send( response );
+			}
+
 			free( buf );
 		}
 		else
@@ -310,6 +634,30 @@ void setup()
 		}
 		digitalWrite( led, 0 );
 	} );
+
+		server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
+			digitalWrite( led, 1 );
+
+			StaticJsonDocument<512> stats;
+			stats[ "uptimeMs" ] = millis();
+			stats[ "updatesPerMinute" ] = LastUpdatesPerMinute;
+			stats[ "currentMinuteUpdates" ] = NumUpdates;
+			stats[ "noUpdateMinutes" ] = NumUpdatesAt0;
+			stats[ "freeHeap" ] = LastFreeHeap;
+			stats[ "largestHeapBlock" ] = LastLargestHeapBlock;
+			stats[ "freeHeapNow" ] = esp_get_free_heap_size();
+			stats[ "largestHeapBlockNow" ] = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
+			stats[ "heapMin" ] = HeapTelemetryMin;
+			stats[ "heapMax" ] = HeapTelemetryMax;
+			stats[ "heapLargestMin" ] = HeapTelemetryLargestMin;
+			stats[ "lastStatsAtMs" ] = LastStatsAt;
+
+			String out;
+			serializeJson( stats, out );
+			request->send( 200, "application/json", out );
+
+			digitalWrite( led, 0 );
+		} );
 
 	server.on( "/api/v1/device", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
@@ -339,6 +687,7 @@ void setup()
 
 	_updateServer.setup( &server );
 
+	server.addHandler( &bleEvents );
 	server.begin();
 	Serial.println( "HTTP server started" );
 
@@ -360,6 +709,17 @@ void setup()
 	uint8_t mac[ 6 ];
 	WiFi.macAddress( mac );
 	sprintf( macAddress, "%0.2x:%0.2x:%0.2x:%0.2x:%0.2x:%0.2x", mac[ 5 ], mac[ 4 ], mac[ 3 ], mac[ 2 ], mac[ 1 ], mac[ 0 ] );
+
+	HeapTelemetryStart = esp_get_free_heap_size();
+	HeapTelemetryLast = HeapTelemetryStart;
+	HeapTelemetryLastAt = millis();
+	HeapTelemetryMin = HeapTelemetryStart;
+	HeapTelemetryMax = HeapTelemetryStart;
+	HeapTelemetryLargestMin = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
+	LastFreeHeap = HeapTelemetryStart;
+	LastLargestHeapBlock = HeapTelemetryLargestMin;
+	LastStatsAt = millis();
+	ReportHeapTelemetry( true );
 
 	if ( udp.listenMulticast( IPAddress( 239, 1, 2, 3 ), 1234 ) )
 	{
@@ -404,6 +764,20 @@ void loop()
 			while ( true );
 		}
 
+		if ( pendingSSEUpdate && ( millis() - lastSSESend >= 1000 ) )
+		{
+			pendingSSEUpdate = false;
+			lastSSESend = millis();
+			bleEvents.send( "update", "ble", millis() );
+		}
+
+			if ( pendingSSEStats && ( millis() - lastSSEStatsSend >= 1000 ) )
+			{
+				pendingSSEStats = false;
+				lastSSEStatsSend = millis();
+				bleEvents.send( "update", "stats", millis() );
+			}
+
 		if ( millis() >= sendBroadcast )
 		{
 			// Send multicast
@@ -426,13 +800,19 @@ void loop()
 				RebootRequired = true;
 			}
 
+			LastUpdatesPerMinute = NumUpdates;
 			Serial.printf( "BLE updates %i per minute\n", NumUpdates );
 			NumUpdates = 0;
 
 			// Report heap available
 			uint32_t freeHeap = esp_get_free_heap_size();
-			uint32_t largestHeapBlock = esp_get_minimum_free_heap_size();
+			uint32_t largestHeapBlock = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
+			LastFreeHeap = freeHeap;
+			LastLargestHeapBlock = largestHeapBlock;
+			LastStatsAt = millis();
+			pendingSSEStats = true;
 			Serial.printf( "\nFree Heap %i, Largest block %i\n\n", freeHeap, largestHeapBlock );
+			ReportHeapTelemetry( true );
 			if ( largestHeapBlock < 30000 )
 			{
 				Serial.println( "Low heap, rebooting" );
@@ -456,13 +836,18 @@ void loop()
 		{
 			static char outstr[ 50 ];
 
-			if ( OurCallbacks.HasCallbacks() )
+			lockCallbacks();
+			bool hasCallbacks = OurCallbacks.HasCallbacks();
+			unlockCallbacks();
+			if ( hasCallbacks )
 			{
 				SendChangedDevices();
 			}
 		}
 
+		lockCallbacks();
 		OurCallbacks.Check( millis() ); // Check if any of the registered callbacks have timedout
+		unlockCallbacks();
 	} // end of endless loop ;-)
 
 } // End of loop
@@ -503,46 +888,37 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 void SendChangedDevices()
 {
 	// This object changed so send to registered callbacks
-	char* deviceBuf = ( char* )malloc( 2048 );
-	if ( deviceBuf )
+	char deviceBuf[ 2048 ];
+	int bytes = BLE_Devices.AllToJson( deviceBuf, sizeof( deviceBuf ), true, macAddress );
+	if ( bytes > 0 )
 	{
-		int bytes = BLE_Devices.AllToJson( deviceBuf, 2048, true, macAddress );
-		if ( bytes > 0 )
+		char addresBuf[ 256 ];
+		uint8_t i = 0;
+		lockCallbacks();
+		bool gotEntry = OurCallbacks.Get( i, addresBuf, sizeof( addresBuf ) );
+		unlockCallbacks();
+		while ( gotEntry )
 		{
-
-			char* addresBuf = ( char* )malloc( 256 );
-			if ( addresBuf )
+			if ( SendDeviceChange( addresBuf, deviceBuf, bytes ) == -1 )
 			{
-				uint8_t i = 0;
-				while ( OurCallbacks.Get( i++, addresBuf, 255 ) )
-				{
-					if ( SendDeviceChange( addresBuf, deviceBuf, bytes ) == -1 )
-					{
-						// refused connection
-						OurCallbacks.addRefusal( i );
-					}
-					else
-					{
-						OurCallbacks.resetRefusal( i );
-					}
-				}
-
-				free( addresBuf );
+				// refused connection
+				lockCallbacks();
+				OurCallbacks.addRefusal( i );
+				unlockCallbacks();
 			}
 			else
 			{
-				Serial.println( "Failed to allocate buffer for address buffer" );
-				RebootRequired = true;
+				lockCallbacks();
+				OurCallbacks.resetRefusal( i );
+				unlockCallbacks();
 			}
+
+			i++;
+			lockCallbacks();
+			gotEntry = OurCallbacks.Get( i, addresBuf, sizeof( addresBuf ) );
+			unlockCallbacks();
 		}
 	}
-	else
-	{
-		Serial.println( "Failed to allocate buffer for device JSON" );
-		RebootRequired = true;
-	}
-
-	free( deviceBuf );
 }
 
 void WriteToBLEDevice( BLE_COMMAND* BLECommand )
@@ -573,14 +949,10 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 	pBLEScan->stop();
 	delay( 100 );
 
-	// Get the device (might be null if not found)
-	//	const NimBLEAdvertisedDevice* pDevice = results.getDevice( bleAddress );
-
 	if ( pDevice != nullptr )
 	{
-		// The device was found so create a clinet to connect to it
 		NimBLEClient* pBLEClient = NimBLEDevice::createClient();
-		pBLEClient->setConnectTimeout(5 * 1000);
+		pBLEClient->setConnectTimeout( 5 * 1000 );
 		pBLEClient->setConnectionParams( 32, 160, 0, 500 );
 
 		bool complete = false;
@@ -588,10 +960,8 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
 		while ( !complete && ( retries-- > 0 ) )
 		{
-			// Serial.println( "Connecting to device..." );
 			if ( pBLEClient->connect( pDevice, false, false, false ) )
 			{
-				// success
 				Serial.println( "Device connected" );
 
 				BLERemoteService* rs = pBLEClient->getService( serviceUUID );
@@ -604,13 +974,10 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 					{
 						Serial.println( "Got remote characteristic" );
 
-						// Get the notification characteristic
 						BLERemoteCharacteristic* rn = nullptr;
 						if ( ( ( BLECommand->Data[ 0 ] == 87 ) && ( BLECommand->Data[ 1 ] == 15 ) && ( BLECommand->Data[ 2 ] == 72 ) && ( BLECommand->Data[ 3 ] == 1 ) ) ||
 						     ( BLECommand->Data[ 0 ] == 87 ) && ( BLECommand->Data[ 1 ] == 2 ) )
 						{
-							// This request requires data to be return via the notification
-							// Serial.println( "Getting notification characteristic" );
 							rn = rs->getCharacteristic( notifyUUID );
 
 							if ( rn )
@@ -636,75 +1003,55 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 							{
 								Serial.println( "Got notification" );
 
-								// Return data
-								char* replyBuf = ( char* )malloc( 300 );
-								if ( replyBuf )
+								char replyBuf[ 300 ];
+								int idx = BLE_Devices.FindDevice( BLECommand->Address );
+								SWITCHBOT Device;
+								if ( BLE_Devices.GetSWDevice( idx, Device ) )
 								{
-									int idx = BLE_Devices.FindDevice( BLECommand->Address );
-									SWITCHBOT Device;
-									if ( BLE_Devices.GetSWDevice( idx, Device ) )
-									{
-										int bytes = 0;
+									int bytes = 0;
 
-										if ( Device.model == 'u' )
+									if ( Device.model == 'u' )
+									{
+										bytes = snprintf( replyBuf, sizeof( replyBuf ), "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"u\",\"modelName\":\"WoBulb\"},\"replyData\":[", macAddress, BLECommand->Address );
+									}
+									else if ( Device.model == 'x' )
+									{
+										bytes = snprintf( replyBuf, sizeof( replyBuf ), "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"x\",\"modelName\":\"WoBlindTilt\"},\"replyData\":[", macAddress, BLECommand->Address );
+									}
+
+									if ( bytes > 0 )
+									{
+										for ( int i = 0; ( i < BLENotifyLength ) && ( bytes < ( int )sizeof( replyBuf ) - 4 ); i++ )
 										{
-											bytes = snprintf( replyBuf, 300, "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"u\",\"modelName\":\"WoBulb\"},\"replyData\":[",
-											                  macAddress, BLECommand->Address );
-										}
-										else if ( Device.model == 'x' )
-										{
-											bytes = snprintf( replyBuf, 300, "[{\"hubMAC\":\"%s\",\"address\":\"%s\",\"serviceData\":{\"model\":\"x\",\"modelName\":\"WoBlindTilt\"},\"replyData\":[",
-											                  macAddress, BLECommand->Address );
+											bytes += snprintf( replyBuf + bytes, sizeof( replyBuf ) - bytes, "%i,", BLENotifyData[ i ] );
 										}
 
 										if ( bytes > 0 )
 										{
-											// Convert raw data to JsonArray
-											for ( int i = 0; i < BLENotifyLength; i++ )
-											{
-												bytes += snprintf( replyBuf + bytes, 300 - bytes, "%i,", BLENotifyData[ i ] );
-											}
-
 											bytes--;
-											bytes += snprintf( replyBuf + bytes, 300 - bytes, "]}]" );
-
-											char* replyAddress = ( char* )malloc( 300 );
-											if ( replyAddress )
+											bytes += snprintf( replyBuf + bytes, sizeof( replyBuf ) - bytes, "]}]" );
+											char replyAddress[ 300 ];
+											lockCallbacks();
+											bool foundCallback = OurCallbacks.Find( BLECommand->ReplyTo, replyAddress, sizeof( replyAddress ) );
+											unlockCallbacks();
+											if ( foundCallback )
 											{
-												if ( OurCallbacks.Find( BLECommand->ReplyTo, replyAddress, 300 ) )
-												{
-													// Serial.printf( "Sending to %s: %s\n", replyAddress, replyBuf );
-													SendDeviceChange( replyAddress, replyBuf, bytes );
-												}
-												else
-												{
-													Serial.printf( "Callback URL %s not found (1)\n", BLECommand->ReplyTo );
-												}
-
-												free( replyAddress );
+												SendDeviceChange( replyAddress, replyBuf, bytes );
 											}
 											else
 											{
-												Serial.println( "Failed to allocate buf for reply address" );
-												RebootRequired = true;
+												Serial.printf( "Callback URL %s not found (1)\n", BLECommand->ReplyTo );
 											}
-										}
-										else
-										{
-											Serial.printf( "Don't understand format for model %c\n", Device.model );
 										}
 									}
 									else
 									{
-										Serial.printf( "Callback URL %s not found (2)\n", BLECommand->ReplyTo );
+										Serial.printf( "Don't understand format for model %c\n", Device.model );
 									}
-
-									free( replyBuf );
 								}
 								else
 								{
-									Serial.println( "Failed to allocate buf for reply buffer" );
-									RebootRequired = true;
+									Serial.printf( "Callback URL %s not found (2)\n", BLECommand->ReplyTo );
 								}
 							}
 

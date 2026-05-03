@@ -1219,7 +1219,7 @@ bool BLE_Device::parsePresence2( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 	uint8_t byte7 = Device.Data[ 7 + 4 + 2 ];
 	uint8_t byte11 = Device.Data[ 11 + 4 + 2 ];
-	
+
 	SW_Device.Presence.light   = ( byte11 & 0x1F );
 	SW_Device.Presence.motion  = ( ( byte7 & 0x40 ) != 0 );
 	SW_Device.Presence.battery = ( (byte7 >> 2) & 0x03 );
@@ -1407,7 +1407,7 @@ bool BLE_Device::parseMeterProCO2( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 ClientCallbacks::ClientCallbacks()
 {
-	memset( Callbacks, 0, 5 );
+	memset( Callbacks, 0, sizeof( Callbacks ) );
 	NumCallbacks = 0;
 }
 
@@ -1436,9 +1436,16 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
 		}
 	}
 
+	if ( NumCallbacks >= ( int )( sizeof( Callbacks ) / sizeof( Callbacks[ 0 ] ) ) )
+	{
+		Serial.println( "Request failed, callback list is full." );
+		return false;
+	}
+
 	Callbacks[ NumCallbacks ].activatedTime = t;
 	Callbacks[ NumCallbacks ].refusals		= 0;
-	strcpy( Callbacks[ NumCallbacks ].url, url );
+	strncpy( Callbacks[ NumCallbacks ].url, url, sizeof( Callbacks[ NumCallbacks ].url ) - 1 );
+	Callbacks[ NumCallbacks ].url[ sizeof( Callbacks[ NumCallbacks ].url ) - 1 ] = 0;
 	NumCallbacks++;
 
 	Serial.printf( "Request OK, URI %s has been added.\n", url );
@@ -1457,7 +1464,12 @@ bool ClientCallbacks::Find( const char* base_url, char* full_url, int bufSize )
 	{
 		if ( strstr( Callbacks[ i ].url, base_url ) != nullptr )
 		{
-			strncpy( full_url, Callbacks[ i ].url, bufSize );
+			if ( bufSize <= 0 )
+			{
+				return false;
+			}
+			strncpy( full_url, Callbacks[ i ].url, bufSize - 1 );
+			full_url[ bufSize - 1 ] = 0;
 			return true;
 		}
 	}
@@ -1469,7 +1481,12 @@ bool ClientCallbacks::Get( uint8_t Index, char* buf, int BufLength )
 {
 	if ( Index < NumCallbacks )
 	{
-		strncpy( buf, Callbacks[ Index ].url, BufLength );
+		if ( BufLength <= 0 )
+		{
+			return false;
+		}
+		strncpy( buf, Callbacks[ Index ].url, BufLength - 1 );
+		buf[ BufLength - 1 ] = 0;
 		return true;
 	}
 
@@ -1518,19 +1535,26 @@ bool ClientCallbacks::Remove( const char* url )
 
 void ClientCallbacks::addRefusal( uint8_t Index )
 {
-	Callbacks[ Index ].refusals++;
+	if ( Index < NumCallbacks )
+	{
+		Callbacks[ Index ].refusals++;
+	}
 }
 
 void ClientCallbacks::resetRefusal( uint8_t Index )
 {
-	Callbacks[ Index ].refusals = 0;
+	if ( Index < NumCallbacks )
+	{
+		Callbacks[ Index ].refusals = 0;
+	}
 }
 
 void ClientCallbacks::Check( unsigned long t )
 {
+	const unsigned long timeoutMs = 5UL * 60UL * 1000UL;
 	for ( uint8_t i = 0; i < NumCallbacks; i++ )
 	{
-		if ( ( Callbacks[ i ].activatedTime > ( t + ( 5 * 60 * 1000 ) ) ) || ( Callbacks[ i ].refusals > 10 ) )
+		if ( ( ( unsigned long )( t - Callbacks[ i ].activatedTime ) > timeoutMs ) || ( Callbacks[ i ].refusals > 10 ) )
 		{
 			Remove( i );
 			i--;
@@ -1555,18 +1579,23 @@ CommandQ::~CommandQ()
 }
 
 // Searche the queue to see if that request is already there
-bool CommandQ::Find( String Address, String Data )
+bool CommandQ::Find( const char* Address, const char* Data )
 {
+	if ( ( Address == nullptr ) || ( Data == nullptr ) )
+	{
+		return false;
+	}
+
   for (int i = 0; i < NumQd; i++)
   {
   	BLE_COMMAND* entry = &Callbacks[ i ];
-		if (strncmp( entry->Address, Address.c_str(), 18 ) != 0)
+		if ( strncmp( entry->Address, Address, sizeof( entry->Address ) ) != 0 )
     {
       // No match so check next entry
       continue;
     }
 
-		if (memcmp( entry->Data, Data.c_str(), entry->DataLen ) != 0)
+		if ( memcmp( entry->Data, Data, entry->DataLen ) != 0 )
     {
       // No match so check next entry
       continue;
@@ -1578,8 +1607,13 @@ bool CommandQ::Find( String Address, String Data )
   return false;
 }
 
-bool CommandQ::Push( String Address, String Data, String ReplyTo )
+bool CommandQ::Push( const char* Address, const char* Data, const char* ReplyTo )
 {
+	if ( ( Address == nullptr ) || ( Data == nullptr ) || ( ReplyTo == nullptr ) )
+	{
+		return false;
+	}
+
 	if ( NumQd < QSize )
 	{
 		NumQd++;
@@ -1591,11 +1625,13 @@ bool CommandQ::Push( String Address, String Data, String ReplyTo )
 			QEntry = 0;
 		}
 
-		strncpy( entry->Address, Address.c_str(), 18 );
-		strncpy( entry->ReplyTo, ReplyTo.c_str(), 50 );
+		strncpy( entry->Address, Address, sizeof( entry->Address ) - 1 );
+		entry->Address[ sizeof( entry->Address ) - 1 ] = 0;
+		strncpy( entry->ReplyTo, ReplyTo, sizeof( entry->ReplyTo ) - 1 );
+		entry->ReplyTo[ sizeof( entry->ReplyTo ) - 1 ] = 0;
 
 		uint8_t* buf = entry->Data;
-		char* endPtr = ( char* ) Data.c_str();
+		char* endPtr = ( char* ) Data;
 
 		// Serial.printf( "Converting string %s to buffer: ", endPtr );
 
