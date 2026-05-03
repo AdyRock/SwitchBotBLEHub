@@ -187,7 +187,7 @@ class BLE_Device
 	};
 };
 
-typedef struct CALL_BACK
+struct CALL_BACK
 {
 	char url[ 255 ];
 	unsigned long activatedTime;

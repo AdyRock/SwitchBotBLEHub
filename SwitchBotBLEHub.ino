@@ -34,189 +34,372 @@
 
 const char* version = "Hello! SwitchBot BLE Hub V2.10";
 
-const char HTML[] PROGMEM = "<!DOCTYPE html>\n<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n    <title>SwitchBot BLE Hub</title>\n    <style>\n      body{margin:0;background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;}\n      .wrap{max-width:760px;margin:2rem auto;padding:0 1rem;}\n      .card{background:#252526;border:1px solid #3c3c3c;border-radius:10px;padding:1.25rem 1.1rem;}\n      h1{margin:0 0 .25rem;color:#9cdcfe;font-size:1.55rem;}\n      .ver{margin:0 0 1.1rem;color:#a0a0a0;font-size:.95rem;}\n      .links{display:grid;gap:.7rem;}\n      a.btn{display:block;text-decoration:none;background:#007acc;color:#fff;padding:.7rem .8rem;border-radius:6px;font-weight:600;}\n      a.btn:hover{background:#005f9e;}\n    </style>\n  </head>\n  <body>\n    <div class=\"wrap\">\n      <div class=\"card\">\n        <h1>SwitchBot BLE Hub</h1>\n        <p class=\"ver\">Version 2.10</p>\n        <div class=\"links\">\n          <a class=\"btn\" href=\"/update\">Update firmware</a>\n          <a class=\"btn\" href=\"/api/v1/devices\">View registered devices (JSON)</a>\n          <a class=\"btn\" href=\"/api/v1/devices/table\">View registered devices (table)</a>\n        </div>\n      </div>\n    </div>\n  </body>\n</html>\n";
+static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SwitchBot BLE Hub</title>
+    <style>
+      body { margin: 0; background: #1e1e1e; color: #d4d4d4; font-family: sans-serif; }
+      .wrap { max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+      .card { background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 1.25rem 1.1rem; }
+      h1 { margin: 0 0 .25rem; color: #9cdcfe; font-size: 1.55rem; }
+      .ver { margin: 0 0 1.1rem; color: #a0a0a0; font-size: .95rem; }
+      .links { display: grid; gap: .7rem; }
+      a.btn { display: block; text-decoration: none; background: #007acc; color: #fff; padding: .7rem .8rem; border-radius: 6px; font-weight: 600; }
+      a.btn:hover { background: #005f9e; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>SwitchBot BLE Hub</h1>
+        <p class="ver">Version 2.10</p>
+        <div class="links">
+          <a class="btn" href="/update">Update firmware</a>
+          <a class="btn" href="/api/v1/devices">View registered devices (JSON)</a>
+          <a class="btn" href="/api/v1/devices/table">View registered devices (table)</a>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+)HTMLEOF";
 
-const char DEVICES_TABLE_HTML[] PROGMEM = R"HTML(
-<!DOCTYPE html><html><head>
-<meta charset='UTF-8'><title>Devices</title>
-<style>
-body{font-family:sans-serif;background:#1e1e1e;color:#d4d4d4;margin:1rem 2rem;}
-h2{color:#9cdcfe;margin-top:1.8rem;margin-bottom:0.4rem;border-bottom:1px solid #3c3c3c;padding-bottom:4px;}
-table{border-collapse:collapse;margin-bottom:0.5rem;font-size:0.85rem;}
-th{background:#007acc;color:#fff;padding:6px 10px;text-align:left;white-space:nowrap;cursor:pointer;user-select:none;}
-th:hover{background:#005f9e;}
-td{padding:5px 10px;border-bottom:1px solid #3c3c3c;white-space:nowrap;}
-tr:nth-child(even){background:#252526;}
-tr:hover td{background:#2d2d2d;}
-#stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0.6rem;margin:1rem 0;}
-.stat{background:#252526;border:1px solid #3c3c3c;border-radius:6px;padding:0.5rem 0.6rem;}
-.stat .k{font-size:0.75rem;color:#9aa0a6;}
-.stat .v{font-size:1rem;color:#d4d4d4;font-weight:600;}
-#refresh{margin-bottom:1rem;padding:6px 14px;background:#007acc;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.9rem;}
-#refresh:hover{background:#005f9e;}
-#ts{margin-left:1rem;font-size:0.8rem;color:#888;}
-</style></head><body>
-<h1 style='color:#9cdcfe'>Registered Devices</h1>
-<button id='refresh' onclick='refreshAll()'>&#8635; Refresh</button>
-<span id='ts'></span><span id='live' style='margin-left:1rem;font-size:0.8rem;color:#555'>&#9679; connecting...</span>
-<div id='stats'></div>
-<div id='tbl'></div>
-<script>
-var groups={};
-var sortPrefs={};
-var statsTimer=null;
-var lastStats=null;
-var statsClockOffsetMs=0;
-var nextStatsServerMs=0;
-var waitingStatsRefresh=false;
-function mkStat(k,v){return '<div class=stat><div class=k>'+k+'</div><div class=v>'+v+'</div></div>';}
-function getStatsRemainingSeconds(){
-	if(nextStatsServerMs<=0)return '--';
-	var serverNowMs=Date.now()-statsClockOffsetMs;
-	var rem=Math.ceil((nextStatsServerMs-serverNowMs)/1000);
-	if(rem<0)rem=0;
-	return rem;
-}
-function renderStats(s){
-	var h='';
-	h+=mkStat('Updates/min',s.updatesPerMinute);
-	h+=mkStat('Next stats refresh',getStatsRemainingSeconds()+'s');
-	h+=mkStat('Free heap',s.freeHeapNow);
-	h+=mkStat('Largest block',s.largestHeapBlockNow);
-	h+=mkStat('Heap min',s.heapMin);
-	h+=mkStat('Heap max',s.heapMax);
-	h+=mkStat('Largest min',s.heapLargestMin);
-	h+=mkStat('Uptime',Math.floor((s.uptimeMs||0)/1000)+'s');
-	document.getElementById('stats').innerHTML=h;
-}
-function startStatsTimer(){
-	if(statsTimer!==null)return;
-	statsTimer=setInterval(function(){
-		if(lastStats){
-			if(getStatsRemainingSeconds()===0&&!waitingStatsRefresh){
-				waitingStatsRefresh=true;
-			loadStats();
+static const char DEVICES_JSON_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Registered Devices</title>
+    <style>
+      body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; margin: 1rem 2rem; }
+      h1 { color: #9cdcfe; font-family: sans-serif; }
+      pre {
+        background: #252526;
+        border: 1px solid #3c3c3c;
+        border-radius: 6px;
+        padding: 1rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 0.9rem;
+      }
+      .k { color: #9cdcfe; }
+      .s { color: #ce9178; }
+      .n { color: #b5cea8; }
+      .b { color: #569cd6; }
+    </style>
+  </head>
+  <body>
+    <h1>Registered Devices</h1>
+    <pre id="out"></pre>
+    <script>
+      function esc(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      }
+      function colorize(json) {
+        return json.replace(/(\x22(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\\x22])*\x22\s*:?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(m) {
+          var c = "n";
+          if (/^\x22/.test(m)) {
+            c = /:$/.test(m) ? "k" : "s";
+          } else if (/true|false/.test(m) || /null/.test(m)) {
+            c = "b";
+          }
+          return "<span class=\"" + c + "\">" + m + "</span>";
+        });
+      }
+      fetch("/api/v1/devices", { headers: { Accept: "application/json" } })
+        .then(function(r) { return r.json(); })
+        .then(function(raw) {
+          document.getElementById("out").innerHTML = colorize(esc(JSON.stringify(raw, null, 2)));
+        })
+        .catch(function(e) {
+          document.getElementById("out").textContent = "Error: " + e;
+        });
+    </script>
+  </body>
+</html>
+)HTMLEOF";
+
+static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Devices</title>
+    <style>
+      body { font-family: sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 1rem 2rem; }
+      h2 { color: #9cdcfe; margin-top: 1.8rem; margin-bottom: 0.4rem; border-bottom: 1px solid #3c3c3c; padding-bottom: 4px; }
+      table { border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.85rem; }
+      th { background: #007acc; color: #fff; padding: 6px 10px; text-align: left; white-space: nowrap; cursor: pointer; -webkit-user-select: none; user-select: none; }
+      th:hover { background: #005f9e; }
+      td { padding: 5px 10px; border-bottom: 1px solid #3c3c3c; white-space: nowrap; }
+      tr:nth-child(even) { background: #252526; }
+      tr:hover td { background: #2d2d2d; }
+      #stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem; margin: 1rem 0; }
+      .stat { background: #252526; border: 1px solid #3c3c3c; border-radius: 6px; padding: 0.5rem 0.6rem; }
+      .stat .k { font-size: 0.75rem; color: #9aa0a6; }
+      .stat .v { font-size: 1rem; color: #d4d4d4; font-weight: 600; }
+      #refresh { margin-bottom: 1rem; padding: 6px 14px; background: #007acc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
+      #refresh:hover { background: #005f9e; }
+      h1 { color: #9cdcfe; }
+      #ts { margin-left: 1rem; font-size: 0.8rem; color: #888; }
+      #live { margin-left: 1rem; font-size: 0.8rem; color: #555; }
+			#rssiGuide { margin: 0.5rem 0 1rem; font-size: 0.8rem; color: #bbb; display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+			.q { padding: 0.15rem 0.45rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; border: 1px solid transparent; }
+			.q-excellent { color: #9ef59e; border-color: #2f8f2f; }
+			.q-good { color: #9cdcfe; border-color: #2f6f8f; }
+			.q-fair { color: #f8d37a; border-color: #8f7a2f; }
+			.q-acceptable { color: #f0b57a; border-color: #8f5f2f; }
+			.q-poor { color: #f29a9a; border-color: #8f2f2f; }
+    </style>
+  </head>
+  <body>
+    <h1>Registered Devices</h1>
+    <button id="refresh" onclick="refreshAll()">&#8635; Refresh</button>
+    <span id="ts"></span><span id="live">&#9679; connecting...</span>
+    <div id="stats"></div>
+		<div id="rssiGuide">
+			<strong>RSSI guide:</strong>
+			<span class="q q-excellent">Excellent (&gt;= -55 dBm)</span>
+			<span class="q q-good">Good (-56 to -67 dBm)</span>
+			<span class="q q-fair">Fair (-68 to -75 dBm)</span>
+			<span class="q q-acceptable">Acceptable (-76 to -85 dBm)</span>
+			<span class="q q-poor">Poor (&lt;= -86 dBm)</span>
+		</div>
+    <div id="tbl"></div>
+    <script>
+      var groups = {};
+      var sortPrefs = {};
+      var statsTimer = null;
+      var lastStats = null;
+      var statsClockOffsetMs = 0;
+      var nextStatsServerMs = 0;
+      var waitingStatsRefresh = false;
+
+      function mkStat(k, v) {
+        return "<div class=stat><div class=k>" + k + "</div><div class=v>" + v + "</div></div>";
+      }
+
+			function formatUptime(ms) {
+				var totalSec = Math.floor((ms || 0) / 1000);
+				var days = Math.floor(totalSec / 86400);
+				var rem = totalSec % 86400;
+				var hh = Math.floor(rem / 3600);
+				rem = rem % 3600;
+				var mm = Math.floor(rem / 60);
+				var ss = rem % 60;
+				function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+				return days + ", " + pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss);
 			}
-			renderStats(lastStats);
-		}
-	},1000);
-}
-function loadStats(){
-	fetch('/api/v1/stats',{headers:{Accept:'application/json'}})
-	.then(function(r){return r.json();})
-	.then(function(s){
-		lastStats=s;
-		statsClockOffsetMs=Date.now()-(s.uptimeMs||0);
-		nextStatsServerMs=(s.lastStatsAtMs||0)+60000;
-		waitingStatsRefresh=false;
-		renderStats(s);
-	})
-	.catch(function(){document.getElementById('stats').innerHTML='';});
-}
-function sortRows(rows,k,asc){
-	rows.sort(function(a,b){
-		var av=a[k]===undefined?'':a[k],bv=b[k]===undefined?'':b[k];
-		if(!isNaN(av)&&!isNaN(bv)){av=+av;bv=+bv;}
-		return asc?(av>bv?1:av<bv?-1:0):(av<bv?1:av>bv?-1:0);
-	});
-}
-function flatten(d){
-	var o={address:d.address,rssi:d.rssi};
-	var s=d.serviceData||{};
-	Object.keys(s).forEach(function(k){
-		if(k==='model')return;
-		var v=s[k];
-		if(v!==null&&typeof v==='object'){
-			Object.keys(v).forEach(function(sk){o[k+'_'+sk]=v[sk];});
-		} else {o[k]=v;}
-	});
-	return o;
-}
-function buildCols(rows){
-	var seen={};
-	rows.forEach(function(r){Object.keys(r).forEach(function(k){seen[k]=true;});});
-	var fixed=['address','rssi'];
-	var rest=Object.keys(seen).filter(function(k){return fixed.indexOf(k)<0&&k!=='modelName';}).sort();
-	return fixed.concat(rest);
-}
-function renderGroup(name,g){
-	var cols=buildCols(g.rows);
-	var h='<table id="t_'+name+'">';
-	h+='<thead><tr>';
-	cols.forEach(function(c,i){
-		var arrow=(g.sortCol===i)?(g.sortAsc?' &#9650;':' &#9660;'):'';
-		h+='<th onclick="sortGroup(\''+name+'\','+i+')">'+c.replace(/_/g,' ')+arrow+'</th>';
-	});
-	h+='</tr></thead><tbody>';
-	g.rows.forEach(function(r){
-		h+='<tr>';
-		cols.forEach(function(c){
-			var v=r[c];
-			if(v===undefined||v===null){h+='<td style="color:#555">-</td>';}
-			else if(typeof v==='boolean'){h+='<td>'+(v?'yes':'no')+'</td>';}
-			else{h+='<td>'+v+'</td>';}
-		});
-		h+='</tr>';
-	});
-	h+='</tbody></table>';
-	return h;
-}
-function render(){
-	var names=Object.keys(groups).sort();
-	if(!names.length){document.getElementById('tbl').innerHTML='<p>No devices found.</p>';return;}
-	var h='';
-	names.forEach(function(name){
-		h+='<h2>'+name+' ('+groups[name].rows.length+')</h2>';
-		h+=renderGroup(name,groups[name]);
-	});
-	document.getElementById('tbl').innerHTML=h;
-}
-function sortGroup(name,i){
-	var g=groups[name];
-	if(g.sortCol===i){g.sortAsc=!g.sortAsc;}else{g.sortCol=i;g.sortAsc=true;}
-	var cols=buildCols(g.rows);
-	var k=cols[i];
-	sortRows(g.rows,k,g.sortAsc);
-	sortPrefs[name]={sortCol:g.sortCol,sortAsc:g.sortAsc};
-	render();
-}
-function load(){
-	fetch('/api/v1/devices',{headers:{Accept:'application/json'}})
-	.then(function(r){return r.json();})
-	.then(function(data){
-		groups={};
-		data.forEach(function(d){
-			var f=flatten(d);
-			var name=f.modelName||'Unknown';
-			if(!groups[name]){groups[name]={rows:[],sortCol:-1,sortAsc:true};}
-			groups[name].rows.push(f);
-		});
-		Object.keys(groups).forEach(function(name){
-			var pref=sortPrefs[name];
-			if(!pref)return;
-			var g=groups[name];
-			var cols=buildCols(g.rows);
-			if(pref.sortCol>=0&&pref.sortCol<cols.length){
-				g.sortCol=pref.sortCol;
-				g.sortAsc=pref.sortAsc;
-				sortRows(g.rows,cols[g.sortCol],g.sortAsc);
+
+      function getStatsRemainingSeconds() {
+        if (nextStatsServerMs <= 0) return "--";
+        var serverNowMs = Date.now() - statsClockOffsetMs;
+        var rem = Math.ceil((nextStatsServerMs - serverNowMs) / 1000);
+        if (rem < 0) rem = 0;
+        return rem;
+      }
+
+      function renderStats(s) {
+        var h = "";
+				var serverNowMs = Date.now() - statsClockOffsetMs;
+        h += mkStat("Next stats refresh", getStatsRemainingSeconds() + "s");
+				h += mkStat("Updates/min", s.updatesPerMinute);
+        h += mkStat("Free heap", s.freeHeapNow);
+        h += mkStat("Largest block", s.largestHeapBlockNow);
+        h += mkStat("Heap min", s.heapMin);
+        h += mkStat("Heap max", s.heapMax);
+        h += mkStat("Largest min", s.heapLargestMin);
+				h += mkStat("Uptime (D, HH:MM:SS)", formatUptime(serverNowMs));
+        document.getElementById("stats").innerHTML = h;
+      }
+
+      function startStatsTimer() {
+        if (statsTimer !== null) return;
+        statsTimer = setInterval(function() {
+          if (lastStats) {
+            if (getStatsRemainingSeconds() === 0 && !waitingStatsRefresh) {
+              waitingStatsRefresh = true;
+              loadStats();
+            }
+            renderStats(lastStats);
+          }
+        }, 1000);
+      }
+
+      function loadStats() {
+        fetch("/api/v1/stats", { headers: { Accept: "application/json" } })
+          .then(function(r) { return r.json(); })
+          .then(function(s) {
+            lastStats = s;
+            statsClockOffsetMs = Date.now() - (s.uptimeMs || 0);
+            nextStatsServerMs = (s.lastStatsAtMs || 0) + 60000;
+            waitingStatsRefresh = false;
+            renderStats(s);
+          })
+          .catch(function() {
+            document.getElementById("stats").innerHTML = "";
+          });
+      }
+
+      function sortRows(rows, k, asc) {
+        rows.sort(function(a, b) {
+          var av = a[k] === undefined ? "" : a[k];
+          var bv = b[k] === undefined ? "" : b[k];
+          if (!isNaN(av) && !isNaN(bv)) { av = +av; bv = +bv; }
+          return asc ? (av > bv ? 1 : av < bv ? -1 : 0) : (av < bv ? 1 : av > bv ? -1 : 0);
+        });
+      }
+
+      function flatten(d) {
+        var o = { address: d.address, rssi: d.rssi };
+        var s = d.serviceData || {};
+        Object.keys(s).forEach(function(k) {
+          if (k === "model") return;
+          var v = s[k];
+          if (v !== null && typeof v === "object") {
+            Object.keys(v).forEach(function(sk) { o[k + "_" + sk] = v[sk]; });
+          } else {
+            o[k] = v;
+          }
+        });
+        return o;
+      }
+
+      function buildCols(rows) {
+        var seen = {};
+        rows.forEach(function(r) { Object.keys(r).forEach(function(k) { seen[k] = true; }); });
+        var fixed = ["address", "rssi"];
+        var rest = Object.keys(seen).filter(function(k) { return fixed.indexOf(k) < 0 && k !== "modelName"; }).sort();
+        return fixed.concat(rest);
+      }
+
+			function rssiQuality(v) {
+				var r = +v;
+				if (r >= -55) return { text: "Excellent", cls: "q-excellent" };
+				if (r >= -67) return { text: "Good", cls: "q-good" };
+				if (r >= -75) return { text: "Fair", cls: "q-fair" };
+				if (r >= -85) return { text: "Acceptable", cls: "q-acceptable" };
+				return { text: "Poor", cls: "q-poor" };
 			}
-		});
-		render();
-		document.getElementById('ts').textContent='Updated: '+new Date().toLocaleTimeString();
-	})
-	.catch(function(e){document.getElementById('tbl').innerHTML='<p style=color:red>Error: '+e+'</p>';});
-}
-function refreshAll(){load();loadStats();}
-refreshAll();
-startStatsTimer();
-var es=new EventSource('/api/v1/events');
-es.addEventListener('ble',function(){load();});
-es.addEventListener('stats',function(){loadStats();});
-es.onopen=function(){document.getElementById('live').style.color='#4ec94e';document.getElementById('live').textContent='\u25cf live';};
-es.onerror=function(){document.getElementById('live').style.color='#e05252';document.getElementById('live').textContent='\u25cf disconnected';};
-</script></body></html>
-)HTML";
+
+      function renderGroup(name, g) {
+        var cols = buildCols(g.rows);
+        var h = '<table id="t_' + name + '">';
+        h += "<thead><tr>";
+        cols.forEach(function(c, i) {
+          var arrow = g.sortCol === i ? (g.sortAsc ? " &#9650;" : " &#9660;") : "";
+          h += '<th onclick="sortGroup(\'' + name + '\',' + i + ')">' + c.replace(/_/g, " ") + arrow + "</th>";
+        });
+        h += "</tr></thead><tbody>";
+        g.rows.forEach(function(r) {
+          h += "<tr>";
+          cols.forEach(function(c) {
+            var v = r[c];
+            if (v === undefined || v === null) {
+              h += '<td style="color:#555">-</td>';
+						} else if (c === "rssi") {
+							var q = rssiQuality(v);
+							h += "<td>" + v + " dBm <span class=\"q " + q.cls + "\">" + q.text + "</span></td>";
+            } else if (typeof v === "boolean") {
+              h += "<td>" + (v ? "yes" : "no") + "</td>";
+            } else {
+              h += "<td>" + v + "</td>";
+            }
+          });
+          h += "</tr>";
+        });
+        h += "</tbody></table>";
+        return h;
+      }
+
+      function render() {
+        var names = Object.keys(groups).sort();
+        if (!names.length) {
+          document.getElementById("tbl").innerHTML = "<p>No devices found.</p>";
+          return;
+        }
+        var h = "";
+        names.forEach(function(name) {
+          h += "<h2>" + name + " (" + groups[name].rows.length + ")</h2>";
+          h += renderGroup(name, groups[name]);
+        });
+        document.getElementById("tbl").innerHTML = h;
+      }
+
+      function sortGroup(name, i) {
+        var g = groups[name];
+        if (g.sortCol === i) {
+          g.sortAsc = !g.sortAsc;
+        } else {
+          g.sortCol = i;
+          g.sortAsc = true;
+        }
+        var cols = buildCols(g.rows);
+        var k = cols[i];
+        sortRows(g.rows, k, g.sortAsc);
+        sortPrefs[name] = { sortCol: g.sortCol, sortAsc: g.sortAsc };
+        render();
+      }
+
+      function load() {
+        fetch("/api/v1/devices", { headers: { Accept: "application/json" } })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            groups = {};
+            data.forEach(function(d) {
+              var f = flatten(d);
+              var name = f.modelName || "Unknown";
+              if (!groups[name]) {
+                groups[name] = { rows: [], sortCol: -1, sortAsc: true };
+              }
+              groups[name].rows.push(f);
+            });
+            Object.keys(groups).forEach(function(name) {
+              var pref = sortPrefs[name];
+              if (!pref) return;
+              var g = groups[name];
+              var cols = buildCols(g.rows);
+              if (pref.sortCol >= 0 && pref.sortCol < cols.length) {
+                g.sortCol = pref.sortCol;
+                g.sortAsc = pref.sortAsc;
+                sortRows(g.rows, cols[g.sortCol], g.sortAsc);
+              }
+            });
+            render();
+            document.getElementById("ts").textContent = "Updated: " + new Date().toLocaleTimeString();
+          })
+          .catch(function(e) {
+            document.getElementById("tbl").innerHTML = "<p style=color:red>Error: " + e + "</p>";
+          });
+      }
+
+      function refreshAll() { load(); loadStats(); }
+
+      refreshAll();
+      startStatsTimer();
+
+      var es = new EventSource("/api/v1/events");
+      es.addEventListener("ble", function() { load(); });
+      es.addEventListener("stats", function() { loadStats(); });
+      es.onopen = function() {
+        document.getElementById("live").style.color = "#4ec94e";
+        document.getElementById("live").textContent = "\u25cf live";
+      };
+      es.onerror = function() {
+        document.getElementById("live").style.color = "#e05252";
+        document.getElementById("live").textContent = "\u25cf disconnected";
+      };
+    </script>
+  </body>
+</html>
+)HTMLEOF";
+
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 SemaphoreHandle_t callbackMutex = nullptr;
@@ -329,7 +512,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand );
 void handleRoot( AsyncWebServerRequest* request )
 {
 	digitalWrite( led, 1 );
-	request->send( 200, "text/html", HTML );
+	request->send( 200, "text/html", HOME_HTML );
 	digitalWrite( led, 0 );
 }
 
@@ -416,6 +599,7 @@ void setup()
 	digitalWrite( led, 0 );
 	Serial.begin( 921600 );
 	Serial.println( "Starting Arduino BLE Client application..." );
+
 	callbackMutex = xSemaphoreCreateMutex();
 	if ( callbackMutex == nullptr )
 	{
@@ -438,7 +622,7 @@ void setup()
 	server.on( "/api/v1/devices/table", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 		Serial.println( "Received request for devices table" );
-		request->send_P( 200, "text/html", DEVICES_TABLE_HTML );
+		request->send( 200, "text/html", DEVICES_TABLE_HTML );
 		digitalWrite( led, 0 );
 	} );
 
@@ -463,7 +647,7 @@ void setup()
 			    if ( request->url() == "/api/v1/callback/add" )
 			    {
 				    Serial.println( "Received request for /api/v1/callback/add" );
-				    StaticJsonDocument<512> jsonDoc;
+				    JsonDocument jsonDoc;
 
 				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
 				    {
@@ -490,7 +674,7 @@ void setup()
 			    else if ( request->url() == "/api/v1/callback/remove" )
 			    {
 				    Serial.println( "Received request for /api/v1/callback/remove" );
-				    StaticJsonDocument<512> jsonDoc;
+				    JsonDocument jsonDoc;
 
 				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
 				    {
@@ -514,7 +698,7 @@ void setup()
 			    }
 			    else if ( request->url() == "/api/v1/device/write" )
 			    {
-				    StaticJsonDocument<512> jsonDoc;
+				    JsonDocument jsonDoc;
 
 				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
 				    {
@@ -576,61 +760,25 @@ void setup()
 						 accept.indexOf( "text/html" ) < 0 );
 		}
 
-		char* buf = ( char* )malloc( 8192 );
-		if ( buf )
+		if ( wantJson )
 		{
-			BLE_Devices.AllToJson( buf, 8192, false, macAddress );
-			Serial.println( buf );
-
-			if ( wantJson )
+			char* buf = ( char* )malloc( 8192 );
+			if ( buf )
 			{
+				BLE_Devices.AllToJson( buf, 8192, false, macAddress );
+				Serial.println( buf );
 				request->send( 200, "application/json", buf );
+				free( buf );
 			}
 			else
 			{
-				// Build a small HTML page that pretty-prints the JSON in the browser.
-				// The raw JSON is embedded as a JS variable so no extra request is needed.
-				AsyncResponseStream* response = request->beginResponseStream( "text/html" );
-				response->print(
-					"<!DOCTYPE html><html><head>"
-					"<meta charset=\"UTF-8\">"
-					"<title>Registered Devices</title>"
-					"<style>"
-					"body{font-family:monospace;background:#1e1e1e;color:#d4d4d4;margin:1rem 2rem;}"
-					"h1{color:#9cdcfe;font-family:sans-serif;}"
-					"pre{background:#252526;border:1px solid #3c3c3c;border-radius:6px;"
-					"padding:1rem;white-space:pre-wrap;word-break:break-all;font-size:0.9rem;}"
-					".k{color:#9cdcfe;} .s{color:#ce9178;} .n{color:#b5cea8;} .b{color:#569cd6;}"
-					"</style></head><body>"
-					"<h1>Registered Devices</h1>"
-					"<pre id=\"out\"></pre>"
-					"<script>"
-					"var raw=" );
-				response->print( buf );
-				response->print(
-					";"
-					"function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}"
-					"function colorize(json){"
-					"return json.replace(/(&quot;(\\\\u[a-zA-Z0-9]{4}|\\\\[^u]|[^\\\\\"])*&quot;\\s*:?|\\b(true|false|null)\\b|-?\\d+(?:\\.\\d*)?(?:[eE][+\\-]?\\d+)?)/g,"
-					"function(m){"
-					"var c='n';"
-					"if(/^&quot;/.test(m)){c=/:$/.test(m)?'k':'s';}"
-					"else if(/true|false/.test(m)){c='b';}"
-					"else if(/null/.test(m)){c='b';}"
-					"return '<span class=\"'+c+'\">'+m+'</span>';});"
-					"}"
-					"document.getElementById('out').innerHTML=colorize(esc(JSON.stringify(raw,null,2)));"
-					"</script>"
-					"</body></html>" );
-				request->send( response );
+				Serial.println( "Failed to allocate buf for JSON" );
+				RebootRequired = true;
 			}
-
-			free( buf );
 		}
 		else
 		{
-			Serial.println( "Failed to allocate buf for JSON" );
-			RebootRequired = true;
+			request->send( 200, "text/html", DEVICES_JSON_HTML );
 		}
 		digitalWrite( led, 0 );
 	} );
@@ -638,7 +786,7 @@ void setup()
 		server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
 			digitalWrite( led, 1 );
 
-			StaticJsonDocument<512> stats;
+			JsonDocument stats;
 			stats[ "uptimeMs" ] = millis();
 			stats[ "updatesPerMinute" ] = LastUpdatesPerMinute;
 			stats[ "currentMinuteUpdates" ] = NumUpdates;
