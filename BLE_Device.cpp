@@ -88,11 +88,13 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 {
 	if ( BLEData == nullptr || BLEDataSize == 0 )
 	{
+		Serial.println( "Invalid BLEData size" );
 		return false;
 	}
 
 	if ( ManufactureData == nullptr && ManufactureDataSize > 0 )
 	{
+		Serial.println( "Invalid ManufactureData size" );
 		return false;
 	}
 
@@ -271,6 +273,20 @@ bool strcmpnc( const char* s1, const char* s2 )
 	return true;
 }
 
+static void toUpperInPlace( char* s )
+{
+	if ( s == nullptr )
+	{
+		return;
+	}
+
+	while ( *s )
+	{
+		*s = ( char )toupper( ( unsigned char )*s );
+		s++;
+	}
+}
+
 BLE_Device::BLE_Device()
 {
 	NumDevices = 0;
@@ -306,11 +322,25 @@ int BLE_Device::FindDevice( const char* MAC )
 
 bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 							uint8_t BLEDataSize, uint8_t* ManufactureData,
-							uint8_t ManufactureDataSize )
+							uint8_t ManufactureDataSize, bool* dataUpdated,
+							bool* failedValidation )
 {
+	if ( dataUpdated != nullptr )
+	{
+		*dataUpdated = false;
+	}
+	if ( failedValidation != nullptr )
+	{
+		*failedValidation = false;
+	}
+
 	if ( !ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ) )
 	{
 		// Wrong type or wrong data size
+		if ( failedValidation != nullptr )
+		{
+			*failedValidation = true;
+		}
 		return false;
 	}
 
@@ -327,8 +357,12 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		}
 
 		// Update the existing device
-		UpdateDevice( i, rssi, BLEData, BLEDataSize, ManufactureData, ManufactureDataSize );
-		return true;
+		bool updated = UpdateDevice( i, rssi, BLEData, BLEDataSize, ManufactureData, ManufactureDataSize );
+		if ( updated && dataUpdated != nullptr )
+		{
+			*dataUpdated = true;
+		}
+		return updated;
 	}
 
 	if ( NumDevices >= 50 )
@@ -339,7 +373,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 	// Serial.printf( "Added %s @ %i\n", MAC, NumDevices );
 
 	strcpy( BLE_devices[ NumDevices ].MAC, MAC );
-	strupr( BLE_devices[ NumDevices ].MAC );
+	toUpperInPlace( BLE_devices[ NumDevices ].MAC );
 
 	switch ( BLEData[ 0 ] )
 	{
@@ -426,6 +460,10 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 
 	Changed = true;
 	NumDevices++;
+	if ( dataUpdated != nullptr )
+	{
+		*dataUpdated = true;
+	}
 
 	return true;
 }
@@ -600,14 +638,14 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 	return true;
 }
 
-void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
+bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 							   uint8_t BLEDataSize, uint8_t* ManufactureData,
 							   uint8_t ManufactureDataSize )
 {
 	if ( !ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData,
 						ManufactureDataSize ) )
 	{
-		return;
+		return false;
 	}
 
 	switch ( BLEData[ 0 ] )
@@ -652,6 +690,8 @@ void BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 	BLE_devices[ Index ].Changed = true;
 	BLE_devices[ Index ].rssi	 = rssi;
 	Changed						 = true;
+
+	return true;
 
 	// Serial.printf( "Updated %s @ %i = %c\n", BLE_devices[ Index ].MAC, Index, BLEData[ 0 ] );
 	// printHex( BLE_devices[ Index ].Data, BLE_devices[ Index ].DataSize );

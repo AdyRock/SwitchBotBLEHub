@@ -112,6 +112,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
         <p class="ver">Version 2.10</p>
         <div class="links">
           <a class="btn" href="/update">Update firmware</a>
+					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
           <a class="btn" href="/api/v1/devices">View registered devices (JSON)</a>
           <a class="btn" href="/api/v1/devices/table">View registered devices (table)</a>
         </div>
@@ -121,96 +122,30 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
 </html>
 )HTMLEOF";
 
-static const char DEVICES_JSON_HTML[] PROGMEM = R"HTMLEOF(
+static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Registered Devices</title>
-    <style>
-      body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; margin: 1rem 2rem; }
-      h1 { color: #9cdcfe; font-family: sans-serif; }
-      pre {
-        background: #252526;
-        border: 1px solid #3c3c3c;
-        border-radius: 6px;
-        padding: 1rem;
-        white-space: pre-wrap;
-        word-break: break-all;
-        font-size: 0.9rem;
-      }
-      .k { color: #9cdcfe; }
-      .s { color: #ce9178; }
-      .n { color: #b5cea8; }
-      .b { color: #569cd6; }
-    </style>
-  </head>
-  <body>
-    <h1>Registered Devices</h1>
-    <pre id="out"></pre>
-    <script>
-      function esc(s) {
-        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-      }
-      function colorize(json) {
-        return json.replace(/(\x22(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\\x22])*\x22\s*:?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(m) {
-          var c = "n";
-          if (/^\x22/.test(m)) {
-            c = /:$/.test(m) ? "k" : "s";
-          } else if (/true|false/.test(m) || /null/.test(m)) {
-            c = "b";
-          }
-          return "<span class=\"" + c + "\">" + m + "</span>";
-        });
-      }
-      fetch("/api/v1/devices", { headers: { Accept: "application/json" } })
-        .then(function(r) { return r.json(); })
-        .then(function(raw) {
-          document.getElementById("out").innerHTML = colorize(esc(JSON.stringify(raw, null, 2)));
-        })
-        .catch(function(e) {
-          document.getElementById("out").textContent = "Error: " + e;
-        });
-    </script>
-  </body>
-</html>
-)HTMLEOF";
-
-static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Devices</title>
-    <style>
-      body { font-family: sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 1rem 2rem; }
-      h2 { color: #9cdcfe; margin-top: 1.8rem; margin-bottom: 0.4rem; border-bottom: 1px solid #3c3c3c; padding-bottom: 4px; }
-      table { border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.85rem; }
-      th { background: #007acc; color: #fff; padding: 6px 10px; text-align: left; white-space: nowrap; cursor: pointer; -webkit-user-select: none; user-select: none; }
-      th:hover { background: #005f9e; }
-      td { padding: 5px 10px; border-bottom: 1px solid #3c3c3c; white-space: nowrap; }
-      tr:nth-child(even) { background: #252526; }
-      tr:hover td { background: #2d2d2d; }
-      #stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem; margin: 1rem 0; }
-      .stat { background: #252526; border: 1px solid #3c3c3c; border-radius: 6px; padding: 0.5rem 0.6rem; }
-	.stat.clickable { cursor: pointer; border-color: #007acc; }
-	.stat.clickable:hover { background: #2a3440; }
-      .stat .k { font-size: 0.75rem; color: #9aa0a6; }
-      .stat .v { font-size: 1rem; color: #d4d4d4; font-weight: 600; }
-      #refresh { margin-bottom: 1rem; padding: 6px 14px; background: #007acc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
-      #refresh:hover { background: #005f9e; }
-      h1 { color: #9cdcfe; }
-      #ts { margin-left: 1rem; font-size: 0.8rem; color: #888; }
-      #live { margin-left: 1rem; font-size: 0.8rem; color: #555; }
-			#rssiGuide { margin: 0.5rem 0 1rem; font-size: 0.8rem; color: #bbb; display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
-			.q { padding: 0.15rem 0.45rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; border: 1px solid transparent; }
-			.q-excellent { color: #9ef59e; border-color: #2f8f2f; }
-			.q-good { color: #9cdcfe; border-color: #2f6f8f; }
-			.q-fair { color: #f8d37a; border-color: #8f7a2f; }
-			.q-acceptable { color: #f0b57a; border-color: #8f5f2f; }
-			.q-poor { color: #f29a9a; border-color: #8f2f2f; }
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>SwitchBot BLE Hub Stats</title>
+		<style>
+			body { margin: 0; background: #1e1e1e; color: #d4d4d4; font-family: sans-serif; }
+			.wrap { max-width: 980px; margin: 1.2rem auto; padding: 0 1rem; }
+			.top { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.9rem; }
+			.title { color: #9cdcfe; font-size: 1.45rem; font-weight: 700; }
+			.home { text-decoration: none; background: #3c3c3c; color: #fff; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; }
+			.home:hover { background: #555; }
+			.meta { color: #9aa0a6; font-size: 0.85rem; margin-bottom: 0.9rem; }
+			.blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0.85rem; }
+			.block { background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 0.85rem; }
+			.block h2 { margin: 0 0 0.6rem; color: #9cdcfe; font-size: 1.05rem; }
+			.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.55rem; }
+			.stat { background: #1f1f1f; border: 1px solid #3a3a3a; border-radius: 6px; padding: 0.45rem 0.5rem; }
+			.stat.clickable { cursor: pointer; border-color: #007acc; }
+			.stat.clickable:hover { background: #2a3440; }
+			.k { font-size: 0.75rem; color: #9aa0a6; }
+			.v { font-size: 1rem; color: #d4d4d4; font-weight: 600; margin-top: 0.2rem; }
 			#heapHistoryModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 20; }
 			#heapHistoryDialog { width: min(940px, 95vw); background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 0.9rem; }
 			#heapHistoryHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem; }
@@ -219,47 +154,61 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
 			#heapHistoryClose:hover { background: #555; }
 			#heapHistoryCanvas { width: 100%; height: 320px; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 6px; display: block; }
 			#heapHistoryMeta { margin-top: 0.55rem; font-size: 0.8rem; color: #bbb; }
-    </style>
-  </head>
-  <body>
-    <h1>Registered Devices</h1>
-    <button id="refresh" onclick="refreshAll()">&#8635; Refresh</button>
-    <span id="ts"></span><span id="live">&#9679; connecting...</span>
-    <div id="stats"></div>
-		<div id="rssiGuide">
-			<strong>RSSI guide:</strong>
-			<span class="q q-excellent">Excellent (&gt;= -55 dBm)</span>
-			<span class="q q-good">Good (-56 to -67 dBm)</span>
-			<span class="q q-fair">Fair (-68 to -75 dBm)</span>
-			<span class="q q-acceptable">Acceptable (-76 to -85 dBm)</span>
-			<span class="q q-poor">Poor (&lt;= -86 dBm)</span>
-		</div>
-    <div id="tbl"></div>
-		<div id="heapHistoryModal" onclick="if(event.target===this) closeFreeHeapHistory()">
-			<div id="heapHistoryDialog">
-				<div id="heapHistoryHeader">
-					<div id="heapHistoryTitle">Free Heap History (last 1000 samples)</div>
-					<button id="heapHistoryClose" onclick="closeFreeHeapHistory()">Close</button>
+			.unknown-wrap { overflow-x: auto; }
+			.unknown-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+			.unknown-table th, .unknown-table td { border-bottom: 1px solid #3c3c3c; padding: 0.45rem 0.5rem; text-align: left; }
+			.unknown-table th { color: #9cdcfe; font-weight: 600; }
+			.unknown-empty { color: #9aa0a6; font-size: 0.85rem; }
+		</style>
+	</head>
+	<body>
+		<div class="wrap">
+			<div class="top">
+				<div class="title">Runtime Stats</div>
+				<a class="home" href="/">Home</a>
+			</div>
+			<div id="meta" class="meta">Loading...</div>
+			<div class="blocks">
+				<section class="block">
+					<h2>BLE Stats</h2>
+					<div class="stats" id="bleStats"></div>
+				</section>
+				<section class="block">
+					<h2>Memory and System</h2>
+					<div class="stats" id="memStats"></div>
+				</section>
+				<section class="block">
+					<h2>Unknown Device Types</h2>
+					<div class="unknown-wrap" id="unknownTypes"></div>
+				</section>
+			</div>
+			<div id="heapHistoryModal" onclick="if(event.target===this) closeFreeHeapHistory()">
+				<div id="heapHistoryDialog">
+					<div id="heapHistoryHeader">
+						<div id="heapHistoryTitle">Free Heap History</div>
+						<button id="heapHistoryClose" onclick="closeFreeHeapHistory()">Close</button>
+					</div>
+					<canvas id="heapHistoryCanvas"></canvas>
+					<div id="heapHistoryMeta"></div>
 				</div>
-				<canvas id="heapHistoryCanvas"></canvas>
-				<div id="heapHistoryMeta"></div>
 			</div>
 		</div>
-    <script>
-      var groups = {};
-      var sortPrefs = {};
-      var statsTimer = null;
-      var lastStats = null;
-      var statsClockOffsetMs = 0;
-      var nextStatsServerMs = 0;
-      var waitingStatsRefresh = false;
+		<script>
+			var lastStats = null;
+			var statsClockOffsetMs = 0;
+			var nextStatsServerMs = 0;
 			var lastHeapHistory = null;
 
-			function mkStat(k, v, clickFn) {
+			function escAttr(s) {
+				return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+			}
+
+			function mkStat(k, v, clickFn, hint) {
 				var cls = clickFn ? "stat clickable" : "stat";
 				var clickAttr = clickFn ? " onclick=\"" + clickFn + "()\"" : "";
-				return "<div class=\"" + cls + "\"" + clickAttr + "><div class=k>" + k + "</div><div class=v>" + v + "</div></div>";
-      }
+				var titleAttr = hint ? ' title="' + escAttr(hint) + '"' : "";
+				return '<div class="' + cls + '"' + clickAttr + titleAttr + '><div class="k">' + k + '</div><div class="v">' + v + '</div></div>';
+			}
 
 			function formatUptime(ms) {
 				var totalSec = Math.floor((ms || 0) / 1000);
@@ -273,29 +222,68 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
 				return days + ", " + pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss);
 			}
 
-      function getStatsRemainingSeconds() {
-        if (nextStatsServerMs <= 0) return "--";
-        var serverNowMs = Date.now() - statsClockOffsetMs;
-        var rem = Math.ceil((nextStatsServerMs - serverNowMs) / 1000);
-        if (rem < 0) rem = 0;
-        return rem;
-      }
-
-      function renderStats(s) {
-        var h = "";
+			function getStatsRemainingSeconds() {
+				if (nextStatsServerMs <= 0) return "--";
 				var serverNowMs = Date.now() - statsClockOffsetMs;
-        h += mkStat("Next stats refresh", getStatsRemainingSeconds() + "s");
-				h += mkStat("Adverts/min", s.advertsSeenPerMinute || 0);
-				h += mkStat("Service UUID match/min", s.matchedServiceDataPerMinute || 0);
-				h += mkStat("Matched empty payload/min", s.matchedEmptyPayloadPerMinute || 0);
-				h += mkStat("Matched rejected/min", s.matchedRejectedPerMinute || 0);
-				h += mkStat("Updates/min", s.updatesPerMinute);
-				h += mkStat("Free heap", s.freeHeap, "openFreeHeapHistory");
-				h += mkStat("Largest block", s.largestHeapBlock);
-				h += mkStat("CPU usage", s.cpuUsage + "%");
-			h += mkStat("Uptime (D, HH:MM:SS)", formatUptime(serverNowMs));
-        document.getElementById("stats").innerHTML = h;
-      }
+				var rem = Math.ceil((nextStatsServerMs - serverNowMs) / 1000);
+				if (rem < 0) rem = 0;
+				return rem;
+			}
+
+			function render(s) {
+				var ble = "";
+				ble += mkStat("Adverts/min", s.advertsSeenPerMinute || 0, null, "Total BLE advertisements seen per minute.");
+				ble += mkStat("UUID match/min", s.matchedServiceDataPerMinute || 0, null, "Advertisements per minute matching supported SwitchBot service UUIDs.");
+				ble += mkStat("Empty payload/min", s.matchedEmptyPayloadPerMinute || 0, null, "Matched advertisements per minute that had no service payload data.");
+				ble += mkStat("Rejected/min", s.matchedRejectedPerMinute || 0, null, "Matched advertisements per minute that failed validation and were ignored.");
+				ble += mkStat("Matches/min", s.updatesPerMinute || 0, null, "Matched advertisements per minute accepted by AddDevice (new, changed, or unchanged match).");
+				ble += mkStat("Actual updates/min", s.actualDataUpdatesPerMinute || 0, null, "New devices or existing devices whose stored data changed per minute.");
+				ble += mkStat("No-update minutes", s.noUpdateMinutes || 0, null, "Consecutive minutes with zero accepted device updates.");
+				document.getElementById("bleStats").innerHTML = ble;
+
+				var mem = "";
+				mem += mkStat("Free heap", s.freeHeap || 0, "openFreeHeapHistory", "Current free heap memory in bytes. Click to view recent history.");
+				mem += mkStat("Largest block", s.largestHeapBlock || 0, null, "Size in bytes of the largest currently available contiguous heap block.");
+				mem += mkStat("CPU usage", (s.cpuUsage || 0) + "%", null, "Estimated CPU busy percentage sampled over the last stats interval.");
+				mem += mkStat("Uptime (D, HH:MM:SS)", formatUptime(s.uptimeMs || 0), null, "Time since the hub last booted.");
+				document.getElementById("memStats").innerHTML = mem;
+				renderUnknownTypes(s.unknownTypes || []);
+
+				document.getElementById("meta").textContent = "Updated: " + new Date().toLocaleTimeString() + " | Next update: " + getStatsRemainingSeconds() + "s";
+			}
+
+			function typeHex(v) {
+				var n = Number(v) & 0xFF;
+				var h = n.toString(16).toUpperCase();
+				if (h.length < 2) h = "0" + h;
+				return "0x" + h;
+			}
+
+			function typeChar(v) {
+				var n = Number(v) & 0xFF;
+				if (n >= 32 && n <= 126) return String.fromCharCode(n);
+				return "-";
+			}
+
+			function renderUnknownTypes(types) {
+				var host = document.getElementById("unknownTypes");
+				if (!types || !types.length) {
+					host.innerHTML = '<div class="unknown-empty">No unknown types seen yet.</div>';
+					return;
+				}
+
+				types = types.slice().sort(function(a, b) { return (b.count || 0) - (a.count || 0); });
+				var h = '';
+				h += '<table class="unknown-table">';
+				h += '<thead><tr><th>Type (Hex)</th><th>ASCII</th><th>Count</th></tr></thead><tbody>';
+				for (var i = 0; i < types.length; i++) {
+					var t = Number(types[i].type || 0) & 0xFF;
+					var c = Number(types[i].count || 0);
+					h += '<tr><td>' + typeHex(t) + '</td><td>' + typeChar(t) + '</td><td>' + c + '</td></tr>';
+				}
+				h += '</tbody></table>';
+				host.innerHTML = h;
+			}
 
 			function closeFreeHeapHistory() {
 				document.getElementById("heapHistoryModal").style.display = "none";
@@ -379,47 +367,269 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
 					.then(function(r) { return r.json(); })
 					.then(function(data) {
 						lastHeapHistory = data;
-						drawFreeHeapHistory(data.values || [], data.intervalMs || 60000);
+						drawFreeHeapHistory(data.values || [], data.intervalMs || 15000);
 					})
 					.catch(function(e) {
 						meta.textContent = "Failed to load history: " + e;
-						drawFreeHeapHistory([], 60000);
+						drawFreeHeapHistory([], 15000);
 					});
 			}
 
 			window.addEventListener("resize", function() {
 				if (document.getElementById("heapHistoryModal").style.display === "flex" && lastHeapHistory) {
-					drawFreeHeapHistory(lastHeapHistory.values || [], lastHeapHistory.intervalMs || 60000);
+					drawFreeHeapHistory(lastHeapHistory.values || [], lastHeapHistory.intervalMs || 15000);
 				}
 			});
 
-      function startStatsTimer() {
-        if (statsTimer !== null) return;
-        statsTimer = setInterval(function() {
-          if (lastStats) {
-            if (getStatsRemainingSeconds() === 0 && !waitingStatsRefresh) {
-              waitingStatsRefresh = true;
-              loadStats();
-            }
-            renderStats(lastStats);
-          }
-        }, 1000);
-      }
+			function loadStats() {
+				fetch("/api/v1/stats", { headers: { Accept: "application/json" } })
+					.then(function(r) { return r.json(); })
+					.then(function(s) {
+						lastStats = s;
+						statsClockOffsetMs = Date.now() - (s.uptimeMs || 0);
+						nextStatsServerMs = (s.lastStatsAtMs || 0) + (s.statsIntervalMs || 15000);
+						render(s);
+					})
+					.catch(function(e) {
+						document.getElementById("meta").textContent = "Failed to load stats: " + e;
+					});
+			}
 
-      function loadStats() {
-        fetch("/api/v1/stats", { headers: { Accept: "application/json" } })
-          .then(function(r) { return r.json(); })
-          .then(function(s) {
-            lastStats = s;
-            statsClockOffsetMs = Date.now() - (s.uptimeMs || 0);
-            nextStatsServerMs = (s.lastStatsAtMs || 0) + 60000;
-            waitingStatsRefresh = false;
-            renderStats(s);
-          })
-          .catch(function() {
-            document.getElementById("stats").innerHTML = "";
-          });
+			loadStats();
+			setInterval(function() { if (lastStats) render(lastStats); }, 1000);
+			setInterval(loadStats, 15000);
+		</script>
+	</body>
+</html>
+)HTMLEOF";
+
+static const char DEVICES_JSON_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Registered Devices</title>
+    <style>
+      body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; margin: 1rem 2rem; }
+			.top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.8rem; }
+			h1 { color: #9cdcfe; font-family: sans-serif; margin: 0; }
+			.home { text-decoration: none; background: #3c3c3c; color: #fff; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; font-family: sans-serif; }
+			.home:hover { background: #555; }
+      pre {
+        background: #252526;
+        border: 1px solid #3c3c3c;
+        border-radius: 6px;
+        padding: 1rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 0.9rem;
       }
+      .k { color: #9cdcfe; }
+      .s { color: #ce9178; }
+      .n { color: #b5cea8; }
+      .b { color: #569cd6; }
+    </style>
+  </head>
+  <body>
+		<div class="top">
+			<h1>Registered Devices</h1>
+			<a class="home" href="/">Home</a>
+		</div>
+    <pre id="out"></pre>
+    <script>
+      function esc(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      }
+      function colorize(json) {
+        return json.replace(/(\x22(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\\x22])*\x22\s*:?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(m) {
+          var c = "n";
+          if (/^\x22/.test(m)) {
+            c = /:$/.test(m) ? "k" : "s";
+          } else if (/true|false/.test(m) || /null/.test(m)) {
+            c = "b";
+          }
+          return "<span class=\"" + c + "\">" + m + "</span>";
+        });
+      }
+      fetch("/api/v1/devices", { headers: { Accept: "application/json" } })
+        .then(function(r) { return r.json(); })
+        .then(function(raw) {
+          document.getElementById("out").innerHTML = colorize(esc(JSON.stringify(raw, null, 2)));
+        })
+        .catch(function(e) {
+          document.getElementById("out").textContent = "Error: " + e;
+        });
+    </script>
+  </body>
+</html>
+)HTMLEOF";
+
+static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Devices</title>
+    <style>
+      body { font-family: sans-serif; background: #1e1e1e; color: #d4d4d4; margin: 1rem 2rem; }
+      h2 { color: #9cdcfe; margin-top: 1.8rem; margin-bottom: 0.4rem; border-bottom: 1px solid #3c3c3c; padding-bottom: 4px; }
+      table { border-collapse: collapse; margin-bottom: 0.5rem; font-size: 0.85rem; }
+      th { background: #007acc; color: #fff; padding: 6px 10px; text-align: left; white-space: nowrap; cursor: pointer; -webkit-user-select: none; user-select: none; }
+      th:hover { background: #005f9e; }
+      td { padding: 5px 10px; border-bottom: 1px solid #3c3c3c; white-space: nowrap; }
+      tr:nth-child(even) { background: #252526; }
+      tr:hover td { background: #2d2d2d; }
+			.top { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.8rem; }
+			h1 { color: #9cdcfe; margin: 0; }
+			.home { text-decoration: none; background: #3c3c3c; color: #fff; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; }
+			.home:hover { background: #555; }
+      #ts { margin-left: 1rem; font-size: 0.8rem; color: #888; }
+      #live { margin-left: 1rem; font-size: 0.8rem; color: #555; }
+			#rssiGuide { margin: 0.5rem 0 1rem; font-size: 0.8rem; color: #bbb; display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+			.q { padding: 0.15rem 0.45rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; border: 1px solid transparent; }
+			.q-excellent { color: #9ef59e; border-color: #2f8f2f; }
+			.q-good { color: #9cdcfe; border-color: #2f6f8f; }
+			.q-fair { color: #f8d37a; border-color: #8f7a2f; }
+			.q-acceptable { color: #f0b57a; border-color: #8f5f2f; }
+			.q-poor { color: #f29a9a; border-color: #8f2f2f; }
+			#heapHistoryModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 20; }
+			#heapHistoryDialog { width: min(940px, 95vw); background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 0.9rem; }
+			#heapHistoryHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem; }
+			#heapHistoryTitle { color: #9cdcfe; font-weight: 700; }
+			#heapHistoryClose { background: #3c3c3c; color: #fff; border: none; border-radius: 5px; padding: 0.35rem 0.65rem; cursor: pointer; }
+			#heapHistoryClose:hover { background: #555; }
+			#heapHistoryCanvas { width: 100%; height: 320px; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 6px; display: block; }
+			#heapHistoryMeta { margin-top: 0.55rem; font-size: 0.8rem; color: #bbb; }
+    </style>
+  </head>
+  <body>
+		<div class="top">
+			<h1>Registered Devices</h1>
+			<a class="home" href="/">Home</a>
+		</div>
+		<span id="ts"></span><span id="live">&#9679; connecting...</span>
+		<div id="rssiGuide">
+			<strong>RSSI guide:</strong>
+			<span class="q q-excellent">Excellent (&gt;= -55 dBm)</span>
+			<span class="q q-good">Good (-56 to -67 dBm)</span>
+			<span class="q q-fair">Fair (-68 to -75 dBm)</span>
+			<span class="q q-acceptable">Acceptable (-76 to -85 dBm)</span>
+			<span class="q q-poor">Poor (&lt;= -86 dBm)</span>
+		</div>
+    <div id="tbl"></div>
+		<div id="heapHistoryModal" onclick="if(event.target===this) closeFreeHeapHistory()">
+			<div id="heapHistoryDialog">
+				<div id="heapHistoryHeader">
+					<div id="heapHistoryTitle">Free Heap History (last 1000 samples)</div>
+					<button id="heapHistoryClose" onclick="closeFreeHeapHistory()">Close</button>
+				</div>
+				<canvas id="heapHistoryCanvas"></canvas>
+				<div id="heapHistoryMeta"></div>
+			</div>
+		</div>
+    <script>
+      var groups = {};
+      var sortPrefs = {};
+			var lastHeapHistory = null;
+
+			function closeFreeHeapHistory() {
+				document.getElementById("heapHistoryModal").style.display = "none";
+			}
+
+			function openFreeHeapHistory() {
+				document.getElementById("heapHistoryModal").style.display = "flex";
+				loadFreeHeapHistory();
+			}
+
+			function drawFreeHeapHistory(values, intervalMs) {
+				var canvas = document.getElementById("heapHistoryCanvas");
+				var meta = document.getElementById("heapHistoryMeta");
+				var ratio = window.devicePixelRatio || 1;
+				var cssW = canvas.clientWidth;
+				var cssH = canvas.clientHeight;
+				canvas.width = Math.max(1, Math.floor(cssW * ratio));
+				canvas.height = Math.max(1, Math.floor(cssH * ratio));
+				var ctx = canvas.getContext("2d");
+				ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+				ctx.clearRect(0, 0, cssW, cssH);
+
+				if (!values || !values.length) {
+					ctx.fillStyle = "#9aa0a6";
+					ctx.font = "14px sans-serif";
+					ctx.fillText("No history samples yet", 16, 28);
+					meta.textContent = "No data available";
+					return;
+				}
+
+				var minV = values[0], maxV = values[0];
+				for (var i = 1; i < values.length; i++) {
+					if (values[i] < minV) minV = values[i];
+					if (values[i] > maxV) maxV = values[i];
+				}
+				if (maxV === minV) {
+					minV = minV - 1;
+					maxV = maxV + 1;
+				}
+
+				var padL = 44, padR = 16, padT = 12, padB = 26;
+				var plotW = Math.max(1, cssW - padL - padR);
+				var plotH = Math.max(1, cssH - padT - padB);
+
+				ctx.strokeStyle = "#333";
+				ctx.lineWidth = 1;
+				for (var gy = 0; gy <= 4; gy++) {
+					var y = padT + (plotH * gy / 4);
+					ctx.beginPath();
+					ctx.moveTo(padL, y);
+					ctx.lineTo(padL + plotW, y);
+					ctx.stroke();
+				}
+
+				ctx.strokeStyle = "#4ec94e";
+				ctx.lineWidth = 2;
+				ctx.beginPath();
+				for (var j = 0; j < values.length; j++) {
+					var x = padL + (plotW * (values.length === 1 ? 0 : j / (values.length - 1)));
+					var t = (values[j] - minV) / (maxV - minV);
+					var y2 = padT + (1 - t) * plotH;
+					if (j === 0) ctx.moveTo(x, y2); else ctx.lineTo(x, y2);
+				}
+				ctx.stroke();
+
+				ctx.fillStyle = "#9aa0a6";
+				ctx.font = "12px sans-serif";
+				ctx.fillText(String(maxV), 6, padT + 4);
+				ctx.fillText(String(minV), 6, padT + plotH + 4);
+
+				var spanMs = intervalMs * (values.length - 1);
+				var spanHours = (spanMs / 3600000).toFixed(1);
+				var latest = values[values.length - 1];
+				meta.textContent = "Samples: " + values.length + " | Window: ~" + spanHours + "h | Min: " + minV + " | Max: " + maxV + " | Latest: " + latest;
+			}
+
+			function loadFreeHeapHistory() {
+				var meta = document.getElementById("heapHistoryMeta");
+				meta.textContent = "Loading...";
+				fetch("/api/v1/stats/free-heap-history", { headers: { Accept: "application/json" } })
+					.then(function(r) { return r.json(); })
+					.then(function(data) {
+						lastHeapHistory = data;
+						drawFreeHeapHistory(data.values || [], data.intervalMs || 15000);
+					})
+					.catch(function(e) {
+						meta.textContent = "Failed to load history: " + e;
+						drawFreeHeapHistory([], 15000);
+					});
+			}
+
+			window.addEventListener("resize", function() {
+				if (document.getElementById("heapHistoryModal").style.display === "flex" && lastHeapHistory) {
+					drawFreeHeapHistory(lastHeapHistory.values || [], lastHeapHistory.intervalMs || 15000);
+				}
+			});
+
 
       function sortRows(rows, k, asc) {
         rows.sort(function(a, b) {
@@ -553,14 +763,10 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
           });
       }
 
-      function refreshAll() { load(); loadStats(); }
-
-      refreshAll();
-      startStatsTimer();
+			load();
 
       var es = new EventSource("/api/v1/events");
-      es.addEventListener("ble", function() { load(); });
-      es.addEventListener("stats", function() { loadStats(); });
+			es.addEventListener("ble", function() { load(); });
       es.onopen = function() {
         document.getElementById("live").style.color = "#4ec94e";
         document.getElementById("live").textContent = "\u25cf live";
@@ -613,12 +819,15 @@ int BLENotifyLength = 0;
 uint32_t BLESending = 0;
 bool RebootRequired = false;
 int32_t NumUpdates = 0;
+int32_t NumActualDataUpdates = 0;
 int32_t NumAdvertsSeen = 0;
 int32_t NumMatchedServiceData = 0;
 int32_t NumMatchedEmptyPayload = 0;
 int32_t NumMatchedRejected = 0;
 int32_t NumUpdatesAt0 = 0;
+int32_t NumZeroUpdateIntervals = 0;
 volatile int32_t LastUpdatesPerMinute = 0;
+volatile int32_t LastActualDataUpdatesPerMinute = 0;
 volatile int32_t LastAdvertsSeenPerMinute = 0;
 volatile int32_t LastMatchedServiceDataPerMinute = 0;
 volatile int32_t LastMatchedEmptyPayloadPerMinute = 0;
@@ -633,10 +842,40 @@ volatile bool pendingSSEUpdate = false;
 volatile bool pendingSSEStats = false;
 unsigned long lastSSESend = 0;
 unsigned long lastSSEStatsSend = 0;
+unsigned long nextStatsSample = 0;
+const uint32_t STATS_SAMPLE_MS = 15000;
+const uint32_t STATS_PER_MINUTE_SCALE = 60000 / STATS_SAMPLE_MS;
 const uint16_t FREE_HEAP_HISTORY_MAX = 1000;
+const uint8_t UNKNOWN_TYPE_MAX = 32;
 uint32_t FreeHeapHistory[ FREE_HEAP_HISTORY_MAX ];
 uint16_t FreeHeapHistoryStart = 0;
 uint16_t FreeHeapHistoryCount = 0;
+struct UNKNOWN_TYPE_ENTRY
+{
+	uint8_t type;
+	uint32_t count;
+};
+UNKNOWN_TYPE_ENTRY UnknownTypes[ UNKNOWN_TYPE_MAX ];
+uint8_t UnknownTypeCount = 0;
+
+static void RecordUnknownType( uint8_t type )
+{
+	for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
+	{
+		if ( UnknownTypes[ i ].type == type )
+		{
+			UnknownTypes[ i ].count++;
+			return;
+		}
+	}
+
+	if ( UnknownTypeCount < UNKNOWN_TYPE_MAX )
+	{
+		UnknownTypes[ UnknownTypeCount ].type = type;
+		UnknownTypes[ UnknownTypeCount ].count = 1;
+		UnknownTypeCount++;
+	}
+}
 
 static void SampleCpuUsage()
 {
@@ -759,20 +998,32 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 		NimBLEUUID devicId = advertisedDevice->getServiceDataUUID();
 		if ( ( devicId == id1 ) || ( devicId == id2 ) )
 		{
-			if ( advertisedDevice->getServiceData().length() == 0 )
+			const std::string& serviceData = advertisedDevice->getServiceData();
+			if ( serviceData.length() == 0 )
 			{
 				NumMatchedEmptyPayload++;
 				return;
 			}
+			const uint8_t* serviceDataBuf = ( const uint8_t* )serviceData.data();
 			NumMatchedServiceData++;
-			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* )advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length() ) )
+			bool dataUpdated = false;
+			bool failedValidation = false;
+			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length(), &dataUpdated, &failedValidation ) )
 			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 				NumUpdates++;
+				if ( dataUpdated )
+				{
+					NumActualDataUpdates++;
+				}
 				pendingSSEUpdate = true;
 			}
 			else
 			{
+				if ( failedValidation )
+				{
+					RecordUnknownType( serviceDataBuf[ 0 ] );
+				}
 				NumMatchedRejected++;
 			}
 			// else
@@ -822,7 +1073,14 @@ void setup()
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/stats/page", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+		request->send( 200, "text/html", STATS_HTML );
+		digitalWrite( led, 0 );
+	} );
+
 	sendBroadcast = millis();
+	nextStatsSample = millis();
 	server.onNotFound( []( AsyncWebServerRequest* request ) {
 		if ( ( request->url() == "/api/v1/callback/add" ) || ( request->url() == "/api/v1/callback/remove" ) || ( request->url() == "/api/v1/device/write" ) )
 			return; // response object already created by onRequestBody
@@ -980,7 +1238,7 @@ void setup()
 		String out;
 		out.reserve( 14000 );
 		out = "{";
-		out += "\"intervalMs\":60000";
+		out += "\"intervalMs\":" + String( STATS_SAMPLE_MS );
 		out += ",\"maxPoints\":" + String( FREE_HEAP_HISTORY_MAX );
 		out += ",\"count\":" + String( FreeHeapHistoryCount );
 		out += ",\"values\":[";
@@ -1009,12 +1267,24 @@ void setup()
 			out += ",\"matchedEmptyPayloadPerMinute\":" + String( LastMatchedEmptyPayloadPerMinute );
 			out += ",\"matchedRejectedPerMinute\":" + String( LastMatchedRejectedPerMinute );
 			out += ",\"updatesPerMinute\":" + String( LastUpdatesPerMinute );
+			out += ",\"actualDataUpdatesPerMinute\":" + String( LastActualDataUpdatesPerMinute );
 			out += ",\"currentMinuteUpdates\":" + String( NumUpdates );
 			out += ",\"noUpdateMinutes\":" + String( NumUpdatesAt0 );
 			out += ",\"freeHeap\":" + String( LastFreeHeap );
 			out += ",\"largestHeapBlock\":" + String( LastLargestHeapBlock );
 			out += ",\"lastStatsAtMs\":" + String( LastStatsAt );
+			out += ",\"statsIntervalMs\":" + String( STATS_SAMPLE_MS );
 			out += ",\"cpuUsage\":" + String( LastCpuUsagePercent );
+			out += ",\"unknownTypes\":[";
+			for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
+			{
+				out += "{\"type\":" + String( UnknownTypes[ i ].type ) + ",\"count\":" + String( UnknownTypes[ i ].count ) + "}";
+				if ( i + 1 < UnknownTypeCount )
+				{
+					out += ",";
+				}
+			}
+			out += "]";
 			out += "}";
 			request->send( 200, "application/json", out );
 
@@ -1141,13 +1411,27 @@ void loop()
 			// Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
 			udp.printf( "SwitchBot BLE Hub! %s", macAddress );
 			sendBroadcast = millis() + 60000;
+		}
 
-			if (NumUpdates == 0)
+		if ( millis() >= nextStatsSample )
+		{
+			nextStatsSample = millis() + STATS_SAMPLE_MS;
+
+			LastAdvertsSeenPerMinute = NumAdvertsSeen * ( int32_t )STATS_PER_MINUTE_SCALE;
+			LastMatchedServiceDataPerMinute = NumMatchedServiceData * ( int32_t )STATS_PER_MINUTE_SCALE;
+			LastMatchedEmptyPayloadPerMinute = NumMatchedEmptyPayload * ( int32_t )STATS_PER_MINUTE_SCALE;
+			LastMatchedRejectedPerMinute = NumMatchedRejected * ( int32_t )STATS_PER_MINUTE_SCALE;
+			LastUpdatesPerMinute = NumUpdates * ( int32_t )STATS_PER_MINUTE_SCALE;
+			LastActualDataUpdatesPerMinute = NumActualDataUpdates * ( int32_t )STATS_PER_MINUTE_SCALE;
+
+			if ( LastUpdatesPerMinute == 0 )
 			{
-				NumUpdatesAt0++;
+				NumZeroUpdateIntervals++;
+				NumUpdatesAt0 = NumZeroUpdateIntervals / ( int32_t )STATS_PER_MINUTE_SCALE;
 			}
 			else
 			{
+				NumZeroUpdateIntervals = 0;
 				NumUpdatesAt0 = 0;
 			}
 
@@ -1157,17 +1441,13 @@ void loop()
 				RebootRequired = true;
 			}
 
-			LastAdvertsSeenPerMinute = NumAdvertsSeen;
-			LastMatchedServiceDataPerMinute = NumMatchedServiceData;
-			LastMatchedEmptyPayloadPerMinute = NumMatchedEmptyPayload;
-			LastMatchedRejectedPerMinute = NumMatchedRejected;
-			LastUpdatesPerMinute = NumUpdates;
-			Serial.printf( "BLE adverts %i/min, UUID matches %i/min, empty payload %i/min, rejected %i/min, updates %i/min\n", NumAdvertsSeen, NumMatchedServiceData, NumMatchedEmptyPayload, NumMatchedRejected, NumUpdates );
+			Serial.printf( "BLE adverts %i/min, UUID matches %i/min, empty payload %i/min, rejected %i/min, updates %i/min\n", LastAdvertsSeenPerMinute, LastMatchedServiceDataPerMinute, LastMatchedEmptyPayloadPerMinute, LastMatchedRejectedPerMinute, LastUpdatesPerMinute );
 			NumAdvertsSeen = 0;
 			NumMatchedServiceData = 0;
 			NumMatchedEmptyPayload = 0;
 			NumMatchedRejected = 0;
 			NumUpdates = 0;
+			NumActualDataUpdates = 0;
 
 			// Report heap available
 			uint32_t freeHeap = esp_get_free_heap_size();

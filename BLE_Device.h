@@ -169,8 +169,9 @@ class BLE_Device
 	int FindDevice( const char* MAC );
 	bool AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 					uint8_t BLEDataSize, uint8_t* ManufactureData,
-					uint8_t ManufactureDataSize );
-	void UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
+					uint8_t ManufactureDataSize, bool* dataUpdated = nullptr,
+					bool* failedValidation = nullptr );
+	bool UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 					   uint8_t BLEDataSize, uint8_t* ManufactureData,
 					   uint8_t ManufactureDataSize );
 	bool CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
