@@ -34,6 +34,7 @@ struct BLE_DEVICE
 {
 	char MAC[ 18 ];
 	int rssi;
+	uint32_t LastRssiUpdateMs;
 	uint8_t Data[ 21 ];
 	uint8_t DataSize;
 	bool Changed;
@@ -111,14 +112,21 @@ struct SWICHBOT_WATERLEAK
 	uint8_t battery;
 };
 
+struct SWICHBOT_PLUG
+{
+	bool state;
+	uint8_t wifiRSSI;
+	bool overload;
+	uint16_t power;
+};
+
 struct SWICHBOT_CO2
 {
 	uint8_t battery;
 	float temperature;
 	uint8_t humidity;
-  uint16_t co2;
+	uint16_t co2;
 };
-
 
 struct SWITCHBOT
 {
@@ -137,6 +145,7 @@ struct SWITCHBOT
 		struct SWICHBOT_BULB Bulb;
 		struct SWICHBOT_BLIND blind;
 		struct SWICHBOT_WATERLEAK WaterLeak;
+		struct SWICHBOT_PLUG Plug;
 		struct SWICHBOT_CO2 MeterProCO2;
 	};
 };
@@ -159,8 +168,9 @@ class BLE_Device
 	bool parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
-  bool parseMeterPro( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
-  bool parseMeterProCO2( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+	bool parsePlug( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+	bool parseMeterPro( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+	bool parseMeterProCO2( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 
   public:
 	BLE_Device();
@@ -229,8 +239,8 @@ class CommandQ
 	CommandQ();
 	~CommandQ();
 
-	bool Find( const char* Address, const char* Data );
-	bool Push( const char* Address, const char* Data, const char* ReplyTo );
+	bool Find( const char* Address, const uint8_t* Data, uint8_t DataLen );
+	bool Push( const char* Address, const uint8_t* Data, uint8_t DataLen, const char* ReplyTo );
 	bool Pop( BLE_COMMAND* pBLE_Command );
 };
 

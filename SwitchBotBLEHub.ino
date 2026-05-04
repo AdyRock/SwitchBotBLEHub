@@ -87,6 +87,192 @@ static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* 
 	return true;
 }
 
+static bool TryGetJsonByteArrayField( const uint8_t* data, size_t len, const char* key, String& value )
+{
+	value = "";
+	if ( data == nullptr || len == 0 || key == nullptr || key[ 0 ] == '\0' )
+	{
+		return false;
+	}
+
+	String body;
+	body.reserve( len );
+	for ( size_t i = 0; i < len; i++ )
+	{
+		body += ( char )data[ i ];
+	}
+
+	const String keyToken = String( "\"" ) + key + "\"";
+	int keyPos = body.indexOf( keyToken );
+	if ( keyPos < 0 )
+	{
+		return false;
+	}
+
+	int colonPos = body.indexOf( ':', keyPos + keyToken.length() );
+	if ( colonPos < 0 )
+	{
+		return false;
+	}
+
+	int pos = colonPos + 1;
+	while ( pos < body.length() && ( body[ pos ] == ' ' || body[ pos ] == '\t' || body[ pos ] == '\r' || body[ pos ] == '\n' ) )
+	{
+		pos++;
+	}
+
+	if ( pos >= body.length() )
+	{
+		return false;
+	}
+
+	if ( body[ pos ] == '"' )
+	{
+		String stringValue;
+		if ( !TryGetJsonStringField( data, len, key, stringValue ) )
+		{
+			return false;
+		}
+
+		stringValue.trim();
+		if ( stringValue.length() == 0 )
+		{
+			return false;
+		}
+
+		if ( stringValue[ 0 ] == '[' )
+		{
+			value = stringValue;
+		}
+		else
+		{
+			value = "[" + stringValue + "]";
+		}
+		return true;
+	}
+
+	if ( body[ pos ] != '[' )
+	{
+		return false;
+	}
+
+	int endPos = pos;
+	while ( endPos < body.length() && body[ endPos ] != ']' )
+	{
+		endPos++;
+	}
+	if ( endPos >= body.length() )
+	{
+		return false;
+	}
+
+	String list = body.substring( pos, endPos + 1 );
+	String normalized = "[";
+	int listPos = 1;
+	bool added = false;
+	while ( listPos < list.length() )
+	{
+		while ( listPos < list.length() && ( list[ listPos ] == ' ' || list[ listPos ] == '\t' || list[ listPos ] == ',' ) )
+		{
+			listPos++;
+		}
+
+		if ( listPos >= list.length() || list[ listPos ] == ']' )
+		{
+			break;
+		}
+
+		int valueStart = listPos;
+		while ( listPos < list.length() && list[ listPos ] >= '0' && list[ listPos ] <= '9' )
+		{
+			listPos++;
+		}
+
+		if ( valueStart == listPos )
+		{
+			return false;
+		}
+
+		long byteValue = list.substring( valueStart, listPos ).toInt();
+		if ( byteValue < 0 || byteValue > 255 )
+		{
+			return false;
+		}
+
+		if ( added )
+		{
+			normalized += ",";
+		}
+		normalized += String( byteValue );
+		added = true;
+	}
+
+	if ( !added )
+	{
+		return false;
+	}
+
+	normalized += "]";
+	value = normalized;
+	return true;
+}
+
+static bool ParseByteListString( const String& value, uint8_t* outData, uint8_t maxLen, uint8_t& outLen )
+{
+	outLen = 0;
+	if ( outData == nullptr || maxLen == 0 )
+	{
+		return false;
+	}
+
+	String list = value;
+	list.trim();
+	if ( list.length() < 3 || list[ 0 ] != '[' || list[ list.length() - 1 ] != ']' )
+	{
+		return false;
+	}
+
+	int pos = 1;
+	while ( pos < list.length() - 1 )
+	{
+		while ( pos < list.length() - 1 && ( list[ pos ] == ' ' || list[ pos ] == '\t' || list[ pos ] == ',' ) )
+		{
+			pos++;
+		}
+
+		if ( pos >= list.length() - 1 )
+		{
+			break;
+		}
+
+		int start = pos;
+		while ( pos < list.length() - 1 && list[ pos ] >= '0' && list[ pos ] <= '9' )
+		{
+			pos++;
+		}
+
+		if ( start == pos )
+		{
+			return false;
+		}
+
+		if ( outLen >= maxLen )
+		{
+			return false;
+		}
+
+		long byteValue = list.substring( start, pos ).toInt();
+		if ( byteValue < 0 || byteValue > 255 )
+		{
+			return false;
+		}
+
+		outData[ outLen++ ] = ( uint8_t )byteValue;
+	}
+
+	return ( outLen > 0 );
+}
+
 static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
 <!DOCTYPE html>
 <html lang="en">
@@ -115,6 +301,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
 					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
           <a class="btn" href="/api/v1/devices">View registered devices (JSON)</a>
           <a class="btn" href="/api/v1/devices/table">View registered devices (table)</a>
+					<a class="btn" href="/api/v1/homey/page">View Homey registration and activity</a>
         </div>
       </div>
     </div>
@@ -198,6 +385,8 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			var statsClockOffsetMs = 0;
 			var nextStatsServerMs = 0;
 			var lastHeapHistory = null;
+			var statsRefreshTimer = null;
+			var statsFetchInFlight = false;
 
 			function escAttr(s) {
 				return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
@@ -382,6 +571,8 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			});
 
 			function loadStats() {
+				if (statsFetchInFlight) return;
+				statsFetchInFlight = true;
 				fetch("/api/v1/stats", { headers: { Accept: "application/json" } })
 					.then(function(r) { return r.json(); })
 					.then(function(s) {
@@ -389,15 +580,24 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 						statsClockOffsetMs = Date.now() - (s.uptimeMs || 0);
 						nextStatsServerMs = (s.lastStatsAtMs || 0) + (s.statsIntervalMs || 15000);
 						render(s);
+
+						var serverNowMs = Date.now() - statsClockOffsetMs;
+						var msUntilNext = Math.max(250, nextStatsServerMs - serverNowMs + 50);
+						if (statsRefreshTimer) clearTimeout(statsRefreshTimer);
+						statsRefreshTimer = setTimeout(loadStats, msUntilNext);
 					})
 					.catch(function(e) {
 						document.getElementById("meta").textContent = "Failed to load stats: " + e;
+						if (statsRefreshTimer) clearTimeout(statsRefreshTimer);
+						statsRefreshTimer = setTimeout(loadStats, 5000);
+					})
+					.finally(function() {
+						statsFetchInFlight = false;
 					});
 			}
 
 			loadStats();
 			setInterval(function() { if (lastStats) render(lastStats); }, 1000);
-			setInterval(loadStats, 15000);
 		</script>
 	</body>
 </html>
@@ -780,9 +980,177 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
 </html>
 )HTMLEOF";
 
+static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Homey Monitor</title>
+		<style>
+			body { margin: 0; background: #1e1e1e; color: #d4d4d4; font-family: sans-serif; }
+			.wrap { max-width: 1100px; margin: 1.2rem auto; padding: 0 1rem; }
+			.top { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.9rem; }
+			.title { color: #9cdcfe; font-size: 1.45rem; font-weight: 700; }
+			.home { text-decoration: none; background: #3c3c3c; color: #fff; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; }
+			.home:hover { background: #555; }
+			.grid { display: grid; grid-template-columns: 1fr; gap: .9rem; }
+			.card { background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: .85rem; }
+			.card h2 { margin: 0 0 .7rem; color: #9cdcfe; font-size: 1.05rem; }
+			table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+			th, td { border-bottom: 1px solid #3c3c3c; padding: .45rem .5rem; text-align: left; vertical-align: top; }
+			th { color: #9cdcfe; font-weight: 600; }
+			.empty { color: #9aa0a6; font-size: .86rem; }
+			.meta { color: #9aa0a6; font-size: .82rem; margin-top: .35rem; }
+			code { color: #d7ba7d; }
+		</style>
+	</head>
+	<body>
+		<div class="wrap">
+			<div class="top">
+				<div class="title">Homey Registration and Activity</div>
+				<a class="home" href="/">Home</a>
+			</div>
+			<div class="grid">
+				<section class="card">
+					<h2>Registered Homey Devices</h2>
+					<div id="registered"></div>
+					<div id="meta" class="meta">Loading...</div>
+				</section>
+				<section class="card">
+					<h2>Last 10 Push Updates</h2>
+					<div id="pushUpdates"></div>
+				</section>
+				<section class="card">
+					<h2>Last 10 Received BLE Commands</h2>
+					<div id="bleCommands"></div>
+				</section>
+			</div>
+		</div>
+		<script>
+			var monitorClockOffsetMs = 0;
+			var nextMonitorServerMs = 0;
+			var monitorRefreshTimer = null;
+			var monitorFetchInFlight = false;
+			var monitorLastUpdatedText = "-";
+
+			function esc(s) {
+				return String(s || "")
+					.replace(/&/g, "&amp;")
+					.replace(/</g, "&lt;")
+					.replace(/>/g, "&gt;")
+					.replace(/\"/g, "&quot;")
+					.replace(/'/g, "&#39;");
+			}
+
+			function fmtAge(ms) {
+				var n = Number(ms || 0);
+				if (!n) return "-";
+				return n + " ms";
+			}
+
+			function getMonitorRemainingSeconds() {
+				if (nextMonitorServerMs <= 0) return "--";
+				var serverNowMs = Date.now() - monitorClockOffsetMs;
+				var rem = Math.ceil((nextMonitorServerMs - serverNowMs) / 1000);
+				if (rem < 0) rem = 0;
+				return rem;
+			}
+
+			function updateMonitorMeta(statusPrefix) {
+				var prefix = statusPrefix || "Updated: " + monitorLastUpdatedText;
+				document.getElementById('meta').textContent = prefix + " | Next update: " + getMonitorRemainingSeconds() + "s";
+			}
+
+			function renderRegistered(list) {
+				var host = document.getElementById("registered");
+				if (!list || !list.length) {
+					host.innerHTML = '<div class="empty">No Homey callbacks currently registered.</div>';
+					return;
+				}
+				var h = '<table><thead><tr><th>IP</th><th>Callback URI</th></tr></thead><tbody>';
+				for (var i = 0; i < list.length; i++) {
+					var r = list[i] || {};
+					h += '<tr><td>' + esc(r.ip || '-') + '</td><td><code>' + esc(r.uri || '') + '</code></td></tr>';
+				}
+				h += '</tbody></table>';
+				host.innerHTML = h;
+			}
+
+			function renderPush(list) {
+				var host = document.getElementById("pushUpdates");
+				if (!list || !list.length) {
+					host.innerHTML = '<div class="empty">No push updates sent yet.</div>';
+					return;
+				}
+				var h = '<table><thead><tr><th>At</th><th>IP</th><th>Payload</th><th>Bytes</th><th>HTTP</th></tr></thead><tbody>';
+				for (var i = 0; i < list.length; i++) {
+					var e = list[i] || {};
+					h += '<tr><td>' + fmtAge(e.atMs) + '</td><td>' + esc(e.ip || '-') + '</td><td><code>' + esc(e.payload || '') + '</code></td><td>' + Number(e.bytes || 0) + '</td><td>' + Number(e.httpCode || 0) + '</td></tr>';
+				}
+				h += '</tbody></table>';
+				host.innerHTML = h;
+			}
+
+			function renderCmd(list) {
+				var host = document.getElementById("bleCommands");
+				if (!list || !list.length) {
+					host.innerHTML = '<div class="empty">No BLE commands received yet.</div>';
+					return;
+				}
+				var h = '<table><thead><tr><th>At</th><th>Source IP</th><th>Address</th><th>Data</th><th>Result</th></tr></thead><tbody>';
+				for (var i = 0; i < list.length; i++) {
+					var e = list[i] || {};
+					h += '<tr><td>' + fmtAge(e.atMs) + '</td><td>' + esc(e.sourceIp || '-') + '</td><td><code>' + esc(e.address || '') + '</code></td><td><code>' + esc(e.data || '') + '</code></td><td>' + esc(e.result || '') + '</td></tr>';
+				}
+				h += '</tbody></table>';
+				host.innerHTML = h;
+			}
+
+			function load() {
+				if (monitorFetchInFlight) return;
+				monitorFetchInFlight = true;
+				fetch('/api/v1/homey/monitor', { headers: { Accept: 'application/json' } })
+					.then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+					.then(function(d) {
+						renderRegistered(d.registered || []);
+						renderPush(d.pushUpdates || []);
+						renderCmd(d.bleCommands || []);
+
+						monitorClockOffsetMs = Date.now() - Number(d.uptimeMs || 0);
+						nextMonitorServerMs = Number(d.nextUpdateAtMs || 0);
+						monitorLastUpdatedText = new Date().toLocaleTimeString();
+						updateMonitorMeta();
+
+						var serverNowMs = Date.now() - monitorClockOffsetMs;
+						var msUntilNext = Math.max(250, nextMonitorServerMs - serverNowMs + 50);
+						if (monitorRefreshTimer) clearTimeout(monitorRefreshTimer);
+						monitorRefreshTimer = setTimeout(load, msUntilNext);
+					})
+					.catch(function(e) {
+						document.getElementById('registered').innerHTML = '<div class="empty">Error loading data: ' + esc(e) + '</div>';
+						updateMonitorMeta('Retrying...');
+						if (monitorRefreshTimer) clearTimeout(monitorRefreshTimer);
+						monitorRefreshTimer = setTimeout(load, 5000);
+					})
+					.finally(function() {
+						monitorFetchInFlight = false;
+					});
+			}
+
+			load();
+			setInterval(function() {
+				updateMonitorMeta();
+			}, 1000);
+		</script>
+	</body>
+</html>
+)HTMLEOF";
+
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 SemaphoreHandle_t callbackMutex = nullptr;
+SemaphoreHandle_t historyMutex = nullptr;
 
 static inline void lockCallbacks()
 {
@@ -797,6 +1165,22 @@ static inline void unlockCallbacks()
 	if ( callbackMutex != nullptr )
 	{
 		xSemaphoreGive( callbackMutex );
+	}
+}
+
+static inline void lockHistory()
+{
+	if ( historyMutex != nullptr )
+	{
+		xSemaphoreTake( historyMutex, portMAX_DELAY );
+	}
+}
+
+static inline void unlockHistory()
+{
+	if ( historyMutex != nullptr )
+	{
+		xSemaphoreGive( historyMutex );
 	}
 }
 
@@ -847,6 +1231,34 @@ const uint32_t STATS_SAMPLE_MS = 15000;
 const uint32_t STATS_PER_MINUTE_SCALE = 60000 / STATS_SAMPLE_MS;
 const uint16_t FREE_HEAP_HISTORY_MAX = 1000;
 const uint8_t UNKNOWN_TYPE_MAX = 32;
+const uint8_t HOMEY_HISTORY_MAX = 10;
+
+struct PUSH_UPDATE_LOG_ENTRY
+{
+	uint32_t atMs;
+	char payload[ 512 ];
+	char ip[ 64 ];
+	int bytes;
+	int httpCode;
+};
+
+struct BLE_COMMAND_LOG_ENTRY
+{
+	uint32_t atMs;
+	char sourceIp[ 64 ];
+	char address[ 18 ];
+	char data[ 80 ];
+	char result[ 32 ];
+};
+
+PUSH_UPDATE_LOG_ENTRY PushUpdateHistory[ HOMEY_HISTORY_MAX ];
+uint8_t PushUpdateHistoryStart = 0;
+uint8_t PushUpdateHistoryCount = 0;
+
+BLE_COMMAND_LOG_ENTRY BleCommandHistory[ HOMEY_HISTORY_MAX ];
+uint8_t BleCommandHistoryStart = 0;
+uint8_t BleCommandHistoryCount = 0;
+
 uint32_t FreeHeapHistory[ FREE_HEAP_HISTORY_MAX ];
 uint16_t FreeHeapHistoryStart = 0;
 uint16_t FreeHeapHistoryCount = 0;
@@ -857,6 +1269,139 @@ struct UNKNOWN_TYPE_ENTRY
 };
 UNKNOWN_TYPE_ENTRY UnknownTypes[ UNKNOWN_TYPE_MAX ];
 uint8_t UnknownTypeCount = 0;
+
+static void ExtractIpFromUri( const char* uri, char* outIp, int outSize )
+{
+	if ( outIp == nullptr || outSize <= 0 )
+	{
+		return;
+	}
+
+	outIp[ 0 ] = 0;
+	if ( uri == nullptr || uri[ 0 ] == 0 )
+	{
+		return;
+	}
+
+	const char* host = strstr( uri, "://" );
+	if ( host != nullptr )
+	{
+		host += 3;
+	}
+	else
+	{
+		host = uri;
+	}
+
+	int i = 0;
+	while ( host[ i ] != 0 && host[ i ] != '/' && host[ i ] != ':' && i < outSize - 1 )
+	{
+		outIp[ i ] = host[ i ];
+		i++;
+	}
+	outIp[ i ] = 0;
+}
+
+static String JsonEscape( const char* s )
+{
+	if ( s == nullptr )
+	{
+		return "";
+	}
+
+	String out;
+	out.reserve( strlen( s ) + 8 );
+	for ( const char* p = s; *p != 0; p++ )
+	{
+		switch ( *p )
+		{
+			case '\\':
+				out += "\\\\";
+				break;
+			case '"':
+				out += "\\\"";
+				break;
+			case '\n':
+				out += "\\n";
+				break;
+			case '\r':
+				out += "\\r";
+				break;
+			case '\t':
+				out += "\\t";
+				break;
+			default:
+				out += *p;
+				break;
+		}
+	}
+
+	return out;
+}
+
+static void RecordPushUpdate( const char* target, const char* payload, int bytes, int httpCode )
+{
+	char ip[ 64 ] = {0};
+	ExtractIpFromUri( target, ip, sizeof( ip ) );
+
+	lockHistory();
+	uint8_t idx;
+	if ( PushUpdateHistoryCount < HOMEY_HISTORY_MAX )
+	{
+		idx = ( PushUpdateHistoryStart + PushUpdateHistoryCount ) % HOMEY_HISTORY_MAX;
+		PushUpdateHistoryCount++;
+	}
+	else
+	{
+		idx = PushUpdateHistoryStart;
+		PushUpdateHistoryStart = ( PushUpdateHistoryStart + 1 ) % HOMEY_HISTORY_MAX;
+	}
+
+	PushUpdateHistory[ idx ].atMs = millis();
+	PushUpdateHistory[ idx ].bytes = bytes;
+	PushUpdateHistory[ idx ].httpCode = httpCode;
+	PushUpdateHistory[ idx ].payload[ 0 ] = 0;
+	if ( payload != nullptr && bytes > 0 )
+	{
+		int copyLen = bytes;
+		if ( copyLen > ( int )sizeof( PushUpdateHistory[ idx ].payload ) - 1 )
+		{
+			copyLen = ( int )sizeof( PushUpdateHistory[ idx ].payload ) - 1;
+		}
+		memcpy( PushUpdateHistory[ idx ].payload, payload, copyLen );
+		PushUpdateHistory[ idx ].payload[ copyLen ] = 0;
+	}
+	strncpy( PushUpdateHistory[ idx ].ip, ip, sizeof( PushUpdateHistory[ idx ].ip ) - 1 );
+	PushUpdateHistory[ idx ].ip[ sizeof( PushUpdateHistory[ idx ].ip ) - 1 ] = 0;
+	unlockHistory();
+}
+
+static void RecordBleCommandRequest( const char* sourceIp, const char* address, const char* data, const char* result )
+{
+	lockHistory();
+	uint8_t idx;
+	if ( BleCommandHistoryCount < HOMEY_HISTORY_MAX )
+	{
+		idx = ( BleCommandHistoryStart + BleCommandHistoryCount ) % HOMEY_HISTORY_MAX;
+		BleCommandHistoryCount++;
+	}
+	else
+	{
+		idx = BleCommandHistoryStart;
+		BleCommandHistoryStart = ( BleCommandHistoryStart + 1 ) % HOMEY_HISTORY_MAX;
+	}
+
+	BleCommandHistory[ idx ].atMs = millis();
+	strncpy( BleCommandHistory[ idx ].sourceIp, ( sourceIp != nullptr ? sourceIp : "" ), sizeof( BleCommandHistory[ idx ].sourceIp ) - 1 );
+	BleCommandHistory[ idx ].sourceIp[ sizeof( BleCommandHistory[ idx ].sourceIp ) - 1 ] = 0;
+	strncpy( BleCommandHistory[ idx ].address, ( address != nullptr ? address : "" ), sizeof( BleCommandHistory[ idx ].address ) - 1 );
+	BleCommandHistory[ idx ].address[ sizeof( BleCommandHistory[ idx ].address ) - 1 ] = 0;
+	strncpy( BleCommandHistory[ idx ].data, ( data != nullptr ? data : "" ), sizeof( BleCommandHistory[ idx ].data ) - 1 );
+	BleCommandHistory[ idx ].data[ sizeof( BleCommandHistory[ idx ].data ) - 1 ] = 0;
+	strncpy( BleCommandHistory[ idx ].result, ( result != nullptr ? result : "" ), sizeof( BleCommandHistory[ idx ].result ) - 1 );
+	BleCommandHistory[ idx ].result[ sizeof( BleCommandHistory[ idx ].result ) - 1 ] = 0;
+	unlockHistory();
+}
 
 static void RecordUnknownType( uint8_t type )
 {
@@ -1052,6 +1597,11 @@ void setup()
 	{
 		Serial.println( "Failed to create callback mutex" );
 	}
+	historyMutex = xSemaphoreCreateMutex();
+	if ( historyMutex == nullptr )
+	{
+		Serial.println( "Failed to create history mutex" );
+	}
 
 	AsyncWiFiManager wifiManager( &server, &dns );
 	//    wifiManager.resetSettings();
@@ -1079,6 +1629,12 @@ void setup()
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/homey/page", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+		request->send( 200, "text/html", HOMEY_MONITOR_HTML );
+		digitalWrite( led, 0 );
+	} );
+
 	sendBroadcast = millis();
 	nextStatsSample = millis();
 	server.onNotFound( []( AsyncWebServerRequest* request ) {
@@ -1094,104 +1650,187 @@ void setup()
 
 	server.onRequestBody(
 	    []( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total ) {
-		    if ( request->method() == HTTP_POST )
+		    if ( request->method() != HTTP_POST )
 		    {
-			    digitalWrite( led, 1 );
-
-			    if ( request->url() == "/api/v1/callback/add" )
-			    {
-				    Serial.println( "Received request for /api/v1/callback/add" );
-				    String uri;
-				    if ( TryGetJsonStringField( data, len, "uri", uri ) && uri.length() > 0 )
-				    {
-					    lockCallbacks();
-					    bool addOk = OurCallbacks.Add( uri.c_str(), millis() );
-					    unlockCallbacks();
-					    if ( addOk )
-					    {
-						    request->send( 200, "text/plain", "OK" );
-					    }
-					    else
-					    {
-						    request->send( 429, "text/plain", "Too Many Requests" );
-						    Serial.println( "Callback error 429" );
-					    }
-				    }
-				    else
-				    {
-					    request->send( 400, "text/plain", "Bad Request" );
-					    Serial.println( "Callback error 400" );
-				    }
-			    }
-			    else if ( request->url() == "/api/v1/callback/remove" )
-			    {
-				    Serial.println( "Received request for /api/v1/callback/remove" );
-				    String uri;
-				    if ( TryGetJsonStringField( data, len, "uri", uri ) && uri.length() > 0 )
-				    {
-					    lockCallbacks();
-					    bool removeOk = OurCallbacks.Remove( uri.c_str() );
-					    unlockCallbacks();
-					    if ( removeOk )
-					    {
-						    request->send( 200, "text/plain", "OK" );
-					    }
-					    else
-					    {
-						    request->send( 400, "text/plain", "Bad Request" );
-					    }
-				    }
-				    else
-				    {
-					    request->send( 400, "text/plain", "Bad Request" );
-				    }
-			    }
-			    else if ( request->url() == "/api/v1/device/write" )
-			    {
-				    String clientAddress;
-				    String dataToWrite;
-				    bool hasAddress = TryGetJsonStringField( data, len, "address", clientAddress );
-				    bool hasData = TryGetJsonStringField( data, len, "data", dataToWrite );
-
-				    if ( hasAddress && hasData && clientAddress.length() > 0 )
-				    {
-					    // Check that we have seen that device
-					    int deviceIdx = BLE_Devices.FindDevice( clientAddress.c_str() );
-					    if ( deviceIdx >= 0 )
-					    {
-							String sourcIP = IPAddress( request->client()->getRemoteAddress() ).toString();
-						    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), ( unsigned int )dataToWrite.length(), sourcIP.c_str() );
-
-						    if ( BLECommandQ.Find( clientAddress.c_str(), dataToWrite.c_str() ) )
-						    {
-							    // Same command already queued
-							    request->send( 200, "text/plain", "OK" );
-							    Serial.println( "Command already in the Q" );
-						    }
-						    else if ( BLECommandQ.Push( clientAddress.c_str(), dataToWrite.c_str(), sourcIP.c_str() ) )
-						    {
-							    request->send( 200, "text/plain", "OK" );
-						    }
-						    else
-						    {
-							    request->send( 429, "text/plain", "Too Many Requests" );
-							    Serial.println( "I have too much in my command Q" );
-						    }
-					    }
-					    else
-					    {
-						    request->send( 422, "text/plain", "Unknown device" );
-						    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress.c_str() );
-					    }
-				    }
-				    else
-				    {
-					    request->send( 400, "text/plain", "Bad Request" );
-				    }
-			    }
-
-			    digitalWrite( led, 0 );
+			    return;
 		    }
+
+		    digitalWrite( led, 1 );
+
+		    // Body can arrive in multiple chunks. Buffer it and parse only once complete.
+		    if ( index == 0 )
+		    {
+			    if ( request->_tempObject != nullptr )
+			    {
+				    delete ( String* )request->_tempObject;
+				    request->_tempObject = nullptr;
+			    }
+			    String* body = new String();
+			    if ( body != nullptr )
+			    {
+				    body->reserve( total );
+				    request->_tempObject = body;
+			    }
+		    }
+
+		    if ( request->_tempObject == nullptr )
+		    {
+			    request->send( 500, "text/plain", "Internal Error" );
+			    digitalWrite( led, 0 );
+			    return;
+		    }
+
+		    String* body = ( String* )request->_tempObject;
+		    for ( size_t i = 0; i < len; i++ )
+		    {
+			    *body += ( char )data[ i ];
+		    }
+
+		    if ( ( index + len ) < total )
+		    {
+			    digitalWrite( led, 0 );
+			    return;
+		    }
+
+		    String payload = *body;
+		    delete body;
+		    request->_tempObject = nullptr;
+
+		    const uint8_t* payloadData = ( const uint8_t* )payload.c_str();
+		    size_t payloadLen = payload.length();
+
+		    if ( request->url() == "/api/v1/callback/add" )
+		    {
+			    Serial.println( "Received request for /api/v1/callback/add" );
+			    String uri;
+			    if ( TryGetJsonStringField( payloadData, payloadLen, "uri", uri ) && uri.length() > 0 )
+			    {
+				    lockCallbacks();
+				    bool addOk = OurCallbacks.Add( uri.c_str(), millis() );
+				    unlockCallbacks();
+				    if ( addOk )
+				    {
+					    request->send( 200, "text/plain", "OK" );
+				    }
+				    else
+				    {
+					    request->send( 429, "text/plain", "Too Many Requests" );
+					    Serial.println( "Callback error 429" );
+				    }
+			    }
+			    else
+			    {
+				    request->send( 400, "text/plain", "Bad Request" );
+				    Serial.println( "Callback error 400" );
+			    }
+		    }
+		    else if ( request->url() == "/api/v1/callback/remove" )
+		    {
+			    Serial.println( "Received request for /api/v1/callback/remove" );
+			    String uri;
+			    if ( TryGetJsonStringField( payloadData, payloadLen, "uri", uri ) && uri.length() > 0 )
+			    {
+				    lockCallbacks();
+				    bool removeOk = OurCallbacks.Remove( uri.c_str() );
+				    unlockCallbacks();
+				    if ( removeOk )
+				    {
+					    request->send( 200, "text/plain", "OK" );
+				    }
+				    else
+				    {
+					    request->send( 400, "text/plain", "Bad Request" );
+				    }
+			    }
+			    else
+			    {
+				    request->send( 400, "text/plain", "Bad Request" );
+			    }
+		    }
+		    else if ( request->url() == "/api/v1/device/write" )
+		    {
+				String sourceIP = IPAddress( request->client()->getRemoteAddress() ).toString();
+			    String clientAddress;
+			    String dataToWrite;
+			    uint8_t commandData[ sizeof( BLE_COMMAND::Data ) ];
+			    uint8_t commandDataLen = 0;
+			    bool hasAddress = TryGetJsonStringField( payloadData, payloadLen, "address", clientAddress );
+			    bool hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "data", dataToWrite );
+			    bool parsedData = hasData && ParseByteListString( dataToWrite, commandData, sizeof( commandData ), commandDataLen );
+			    bool hasNonEmptyAddress = ( clientAddress.length() > 0 );
+
+			    if ( hasAddress && hasData && parsedData && hasNonEmptyAddress )
+			    {
+				    // Check that we have seen that device
+				    int deviceIdx = BLE_Devices.FindDevice( clientAddress.c_str() );
+				    if ( deviceIdx >= 0 )
+				    {
+					    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), ( unsigned int )dataToWrite.length(), sourceIP.c_str() );
+
+					    if ( BLECommandQ.Find( clientAddress.c_str(), commandData, commandDataLen ) )
+					    {
+						    // Same command already queued
+						    request->send( 200, "text/plain", "OK" );
+						    Serial.println( "Command already in the Q" );
+							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "already-queued" );
+					    }
+					    else if ( BLECommandQ.Push( clientAddress.c_str(), commandData, commandDataLen, sourceIP.c_str() ) )
+					    {
+						    request->send( 200, "text/plain", "OK" );
+							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "queued" );
+					    }
+					    else
+					    {
+						    String out = "{\"message\":\"Too Many Requests\",\"error\":\"QueueFull\",\"address\":\"" + JsonEscape( clientAddress.c_str() ) + "\"}";
+						    request->send( 429, "application/json", out );
+						    Serial.println( "I have too much in my command Q" );
+							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "queue-full" );
+					    }
+				    }
+				    else
+				    {
+					    String out = "{\"message\":\"Unknown device\",\"error\":\"UnknownDevice\",\"address\":\"" + JsonEscape( clientAddress.c_str() ) + "\"}";
+					    request->send( 422, "application/json", out );
+					    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress.c_str() );
+							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "unknown-device" );
+				    }
+			    }
+			    else
+			    {
+				    String details = "";
+				    if ( !hasAddress )
+				    {
+					    details += "missing-address";
+				    }
+				    else if ( !hasNonEmptyAddress )
+				    {
+					    details += "empty-address";
+				    }
+
+				    if ( !hasData )
+				    {
+					    if ( details.length() > 0 )
+					    {
+						    details += ",";
+					    }
+					    details += "missing-data";
+				    }
+				    else if ( !parsedData )
+				    {
+					    if ( details.length() > 0 )
+					    {
+						    details += ",";
+					    }
+					    details += "invalid-data";
+				    }
+
+				    String out = "{\"message\":\"Bad Request\",\"error\":\"InvalidPayload\",\"details\":\"" + JsonEscape( details.c_str() ) + "\",\"expected\":{\"address\":\"AA:BB:CC:DD:EE:FF\",\"data\":[87,15,71,1,5,0,255,85]}}";
+				    request->send( 400, "application/json", out );
+							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "bad-request" );
+			    }
+		    }
+
+		    digitalWrite( led, 0 );
 	    } );
 
 	server.on( "/api/v1/devices", HTTP_GET, []( AsyncWebServerRequest* request ) {
@@ -1200,24 +1839,28 @@ void setup()
 		Serial.println( "Received request for devices" );
 
 		// Decide whether the caller wants raw JSON (e.g. API clients that send
-		// Accept: application/json) or a pretty HTML page (browser).
-		bool wantJson = false;
+		// Accept: application/json, or no Accept header at all) or a pretty HTML
+		// page (browser). Browsers always include text/html in their Accept header.
+		bool wantJson = true;
 		if ( request->hasHeader( "Accept" ) )
 		{
 			String accept = request->getHeader( "Accept" )->value();
-			wantJson = ( accept.indexOf( "application/json" ) >= 0 &&
-						 accept.indexOf( "text/html" ) < 0 );
+			// Only serve the HTML page if the caller explicitly wants text/html
+			// and has NOT asked for application/json
+			wantJson = ( accept.indexOf( "text/html" ) < 0 ||
+						 accept.indexOf( "application/json" ) >= 0 );
 		}
 
 		if ( wantJson )
 		{
-			char* buf = ( char* )malloc( 8192 );
+			char* buf = ( char* )malloc( 16384 );
 			if ( buf )
 			{
-				BLE_Devices.AllToJson( buf, 8192, false, macAddress );
+				BLE_Devices.AllToJson( buf, 16384, false, macAddress );
 				Serial.println( buf );
-				request->send( 200, "application/json", buf );
+				String json( buf );
 				free( buf );
+				request->send( 200, "application/json", json );
 			}
 			else
 			{
@@ -1252,6 +1895,77 @@ void setup()
 			}
 		}
 		out += "]}";
+
+		request->send( 200, "application/json", out );
+		digitalWrite( led, 0 );
+	} );
+
+	server.on( "/api/v1/homey/monitor", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		String out;
+		out.reserve( 6000 );
+		out = "{";
+
+		out += "\"registered\":[";
+		char uriBuf[ 256 ];
+		uint8_t callbackIndex = 0;
+		bool callbackAdded = false;
+		while ( true )
+		{
+			lockCallbacks();
+			bool gotCallback = OurCallbacks.Get( callbackIndex, uriBuf, sizeof( uriBuf ) );
+			unlockCallbacks();
+			if ( !gotCallback )
+			{
+				break;
+			}
+
+			char ipBuf[ 64 ] = {0};
+			ExtractIpFromUri( uriBuf, ipBuf, sizeof( ipBuf ) );
+
+			if ( callbackAdded ) out += ",";
+			out += "{\"uri\":\"" + JsonEscape( uriBuf ) + "\",\"ip\":\"" + JsonEscape( ipBuf ) + "\"}";
+			callbackAdded = true;
+			callbackIndex++;
+		}
+		out += "],";
+
+		out += "\"pushUpdates\":[";
+		lockHistory();
+		for ( int i = PushUpdateHistoryCount - 1; i >= 0; i-- )
+		{
+			uint8_t idx = ( PushUpdateHistoryStart + i ) % HOMEY_HISTORY_MAX;
+			if ( i != PushUpdateHistoryCount - 1 ) out += ",";
+			out += "{\"atMs\":" + String( PushUpdateHistory[ idx ].atMs );
+			out += ",\"payload\":\"" + JsonEscape( PushUpdateHistory[ idx ].payload ) + "\"";
+			out += ",\"ip\":\"" + JsonEscape( PushUpdateHistory[ idx ].ip ) + "\"";
+			out += ",\"bytes\":" + String( PushUpdateHistory[ idx ].bytes );
+			out += ",\"httpCode\":" + String( PushUpdateHistory[ idx ].httpCode ) + "}";
+		}
+		unlockHistory();
+		out += "],";
+
+		out += "\"bleCommands\":[";
+		lockHistory();
+		for ( int i = BleCommandHistoryCount - 1; i >= 0; i-- )
+		{
+			uint8_t idx = ( BleCommandHistoryStart + i ) % HOMEY_HISTORY_MAX;
+			if ( i != BleCommandHistoryCount - 1 ) out += ",";
+			out += "{\"atMs\":" + String( BleCommandHistory[ idx ].atMs );
+			out += ",\"sourceIp\":\"" + JsonEscape( BleCommandHistory[ idx ].sourceIp ) + "\"";
+			out += ",\"address\":\"" + JsonEscape( BleCommandHistory[ idx ].address ) + "\"";
+			out += ",\"data\":\"" + JsonEscape( BleCommandHistory[ idx ].data ) + "\"";
+			out += ",\"result\":\"" + JsonEscape( BleCommandHistory[ idx ].result ) + "\"}";
+		}
+		unlockHistory();
+		out += "],";
+
+		uint32_t nowMs = millis();
+		out += "\"uptimeMs\":" + String( nowMs );
+		out += ",\"nextUpdateAtMs\":" + String( LastStatsAt + STATS_SAMPLE_MS );
+
+		out += "}";
 
 		request->send( 200, "application/json", out );
 		digitalWrite( led, 0 );
@@ -1547,7 +2261,9 @@ void SendChangedDevices()
 		unlockCallbacks();
 		while ( gotEntry )
 		{
-			if ( SendDeviceChange( addresBuf, deviceBuf, bytes ) == -1 )
+			int httpCode = SendDeviceChange( addresBuf, deviceBuf, bytes );
+			RecordPushUpdate( addresBuf, deviceBuf, bytes, httpCode );
+			if ( httpCode == -1 )
 			{
 				// refused connection
 				lockCallbacks();

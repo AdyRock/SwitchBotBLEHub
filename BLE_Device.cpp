@@ -26,6 +26,7 @@
 
 #define IOTH_DATA_SIZE 15
 #define IOTH_DATA_ID   'w'
+#define IOTH_DATA_ID2  'W'
 
 #define BLIND_DATASIZE	12
 #define BLIND_DATASIZE2 14
@@ -46,6 +47,10 @@
 #define CURTAIN3_DATA_SIZE 6
 #define CURTAIN3_DATA_ID   '{'
 
+#define ROLLERBLIND_DATA_SIZE 4
+#define ROLLERBLIND_DATA_ID   '\''
+#define ROLLERBLIND2_DATA_ID  ','
+
 #define PRESENCE_DATA_SIZE 6
 #define PRESENCE_DATA_ID   's'
 
@@ -57,6 +62,10 @@
 
 #define WATERLEAK_DATA_SIZE 22
 #define WATERLEAK_DATA_ID	'&'
+
+#define PLUG_DATA_SIZE 15
+#define PLUG_DATA_ID	 '?'
+#define PLUG_RSSI_UPDATE_MS 5000
 
 #define METERPRO_DATA_SIZE 12
 #define METERPRO_DATA_ID	'4'
@@ -111,6 +120,7 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 			break;
 
 		case IOTH_DATA_ID:
+		case IOTH_DATA_ID2:
 			if ( ManufactureDataSize >= IOTH_DATA_SIZE - 1 )
 			{
 				return true;
@@ -133,6 +143,14 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 				return true;
 			}
 			expected_size = WATERLEAK_DATA_SIZE - 1;
+			break;
+
+		case PLUG_DATA_ID:
+			if ( ManufactureDataSize >= PLUG_DATA_SIZE - 1 )
+			{
+				return true;
+			}
+			expected_size = PLUG_DATA_SIZE - 1;
 			break;
 
 		case METERPRO_DATA_ID:
@@ -213,6 +231,15 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 						return true;
 					}
 					expected_size = CURTAIN3_DATA_SIZE;
+					break;
+
+				case ROLLERBLIND_DATA_ID:
+				case ROLLERBLIND2_DATA_ID:
+					if ( BLEDataSize >= ROLLERBLIND_DATA_SIZE )
+					{
+						return true;
+					}
+					expected_size = ROLLERBLIND_DATA_SIZE;
 					break;
 
 				case PRESENCE_DATA_ID:
@@ -387,10 +414,11 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 		}
 
 		case IOTH_DATA_ID:
+		case IOTH_DATA_ID2:
 		{
 			// use manufacture data
 			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-			BLE_devices[ NumDevices ].Data[ 0 ] = IOTH_DATA_ID;
+			BLE_devices[ NumDevices ].Data[ 0 ] = BLEData[ 0 ];
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
 			break;
@@ -401,6 +429,16 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 			// use manufacture data
 			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
 			BLE_devices[ NumDevices ].Data[ 0 ] = WATERLEAK_DATA_ID;
+			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
+			break;
+		}
+
+		case PLUG_DATA_ID:
+		{
+			// use manufacture data
+			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+			BLE_devices[ NumDevices ].Data[ 0 ] = PLUG_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
 			break;
@@ -454,6 +492,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 
 	BLE_devices[ NumDevices ].Changed = true;
 	BLE_devices[ NumDevices ].rssi	  = rssi;
+	BLE_devices[ NumDevices ].LastRssiUpdateMs = millis();
 
 	// Serial.printf("Added %s @ %i = %c\n",  BLE_devices[ NumDevices ].MAC,
 	// NumDevices, BLEData[ 0 ] );
@@ -477,10 +516,12 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 	{
 		case BULB_DATA_ID:
 		case IOTH_DATA_ID:
+		case IOTH_DATA_ID2:
 		case BLIND_DATA_ID:
 		case WATERLEAK_DATA_ID:
-    case METERPRO_DATA_ID:
-    case METERPROCO2_DATA_ID:
+		case PLUG_DATA_ID:
+		case METERPRO_DATA_ID:
+		case METERPROCO2_DATA_ID:
 		{
 			if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 1 )
 			{
@@ -554,7 +595,8 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		}
 
 		case IOTH_DATA_ID:
-    case METERPRO_DATA_ID:
+		case IOTH_DATA_ID2:
+		case METERPRO_DATA_ID:
 		{
 			// Compare the IO TH sensor differently as it uses manufacture data
 			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
@@ -585,6 +627,20 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 			// Compare the Water Leak sensor differently as it uses manufacture data
 			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
 				 ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) )
+			{
+				return false;
+			}
+
+			break;
+		}
+
+		case PLUG_DATA_ID:
+		{
+			// Compare the plug differently - ignore wifiRSSI (ManufactureData[11])
+			// as it fluctuates constantly and would cause push notifications on every scan
+			if ( ( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ] ) ||
+				 ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) ||
+				 ( ManufactureData[ 13 ] != BLE_devices[ Index ].Data[ 14 ] ) )
 			{
 				return false;
 			}
@@ -652,8 +708,11 @@ bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 	{
 		case BULB_DATA_ID:
 		case IOTH_DATA_ID:
+		case IOTH_DATA_ID2:
 		case BLIND_DATA_ID:
 		case WATERLEAK_DATA_ID:
+		case PLUG_DATA_ID:
+		case METERPRO_DATA_ID:
 		case METERPROCO2_DATA_ID:
 		{
 			memcpy( BLE_devices[ Index ].Data + 1, ManufactureData,
@@ -687,8 +746,26 @@ bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		}
 	}
 
+	if ( BLEData[ 0 ] == PLUG_DATA_ID )
+	{
+		// Rate-limit RSSI updates for the plug, but always signal Changed so that
+		// meaningful data changes (state, overload, power) push immediately.
+		// RSSI-only fluctuations are already filtered out in CompareDevice, so
+		// UpdateDevice is only called here when something meaningful has changed.
+		uint32_t now = millis();
+		if ( ( uint32_t )( now - BLE_devices[ Index ].LastRssiUpdateMs ) >=
+			 PLUG_RSSI_UPDATE_MS )
+		{
+			BLE_devices[ Index ].rssi = rssi;
+			BLE_devices[ Index ].LastRssiUpdateMs = now;
+		}
+	}
+	else
+	{
+		BLE_devices[ Index ].rssi = rssi;
+		BLE_devices[ Index ].LastRssiUpdateMs = millis();
+	}
 	BLE_devices[ Index ].Changed = true;
-	BLE_devices[ Index ].rssi	 = rssi;
 	Changed						 = true;
 
 	return true;
@@ -723,12 +800,19 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 							  "i,\"serviceData\":",
 							  macAddress, Device.MAC, Device.rssi );
 
+		int rem = BufSize - bytes;
+		if ( rem < 64 )
+		{
+			// Not enough room left for the device-specific JSON — bail cleanly
+			return 0;
+		}
+
 		switch ( Device.model )
 		{
 			case CURTAIN_DATA_ID:
 			{
 				bytes += snprintf(
-					Buf + bytes, BufSize - bytes,
+					Buf + bytes, rem,
 					"{\"model\":\"%c\",\"modelName\":\"WoCurtain\",\"calibration\":"
 					"%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
 					Device.model, ( Device.curtain.calibration ? "true" : "false" ),
@@ -748,6 +832,19 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 					Device.model, ( Device.curtain.calibration ? "true" : "false" ),
 					Device.curtain.battery, Device.curtain.position,
 					Device.curtain.lightLevel );
+
+				break;
+			}
+
+			case ROLLERBLIND_DATA_ID:
+			case ROLLERBLIND2_DATA_ID:
+			{
+				bytes += snprintf(
+					Buf + bytes, BufSize - bytes,
+					"{\"model\":\"%c\",\"modelName\":\"WoRollerBlind\","
+					"\"calibration\":%s,\"battery\":%i,\"position\":%i}}",
+					Device.model, ( Device.curtain.calibration ? "true" : "false" ),
+					Device.curtain.battery, Device.curtain.position );
 
 				break;
 			}
@@ -842,6 +939,7 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 			}
 
 			case IOTH_DATA_ID:
+			case IOTH_DATA_ID2:
 			{
 				bytes += snprintf( Buf + bytes, BufSize - bytes,
 								   "{\"model\":\"%c\",\"modelName\":\"WoIOSensor\","
@@ -861,6 +959,20 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 								   "\"WoWaterLeak\",\"battery\":%i,\"status\":%i}}",
 								   Device.model, Device.WaterLeak.battery,
 								   Device.WaterLeak.status );
+
+				break;
+			}
+
+			case PLUG_DATA_ID:
+			{
+				bytes += snprintf( Buf + bytes, BufSize - bytes,
+								   "{\"model\":\"%c\",\"modelName\":\"Plug\","
+								   "\"state\":%s,\"wifiRSSI\":%i,\"overload\":%s,\"power\":%i}}",
+								   Device.model,
+								   ( Device.Plug.state ? "true" : "false" ),
+								   Device.Plug.wifiRSSI,
+								   ( Device.Plug.overload ? "true" : "false" ),
+								   Device.Plug.power );
 
 				break;
 			}
@@ -945,7 +1057,8 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged,
 	*Buf			= '[';
 	for ( uint8_t i = 0; i < NumDevices; i++ )
 	{
-		if ( totaleBytes >= BufSize )
+		// Leave at least 256 bytes for the next device plus closing bracket/null
+		if ( ( BufSize - totaleBytes ) < 256 )
 		{
 			break;
 		}
@@ -1030,6 +1143,8 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 		case CURTAIN_DATA_ID:
 		case CURTAIN3_DATA_ID:
+		case ROLLERBLIND_DATA_ID:
+		case ROLLERBLIND2_DATA_ID:
 		{
 			return parseCurtain( Device, SW_Device );
 		}
@@ -1055,6 +1170,7 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		}
 
 		case IOTH_DATA_ID:
+		case IOTH_DATA_ID2:
 		{
 			return parseIOTH( Device, SW_Device );
 		}
@@ -1067,6 +1183,11 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		case WATERLEAK_DATA_ID:
 		{
 			return parseWaterLeak( Device, SW_Device );
+		}
+
+		case PLUG_DATA_ID:
+		{
+			return parsePlug( Device, SW_Device );
 		}
 
 		case METERPRO_DATA_ID:
@@ -1119,6 +1240,25 @@ bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
+	if ( ( SW_Device.model == ROLLERBLIND_DATA_ID ) || ( SW_Device.model == ROLLERBLIND2_DATA_ID ) )
+	{
+		if ( Device.DataSize < ROLLERBLIND_DATA_SIZE )
+		{
+			return false;
+		}
+
+		uint8_t byte1 = Device.Data[ 1 ];
+		uint8_t byte2 = Device.Data[ 2 ];
+		uint8_t byte3 = Device.Data[ 3 ];
+
+		SW_Device.curtain.calibration = ( ( byte1 & 0b01000000 ) != 0 );
+		SW_Device.curtain.battery = ( byte2 & 0b01111111 );
+		SW_Device.curtain.position = ( byte3 & 0b01111111 );
+		SW_Device.curtain.moving = false;
+		SW_Device.curtain.lightLevel = 0;
+		return true;
+	}
+
 	if ( ( Device.DataSize < CURTAIN_DATA_SIZE ) &&
 		 ( Device.DataSize < CURTAIN3_DATA_SIZE ) )
 	{
@@ -1390,6 +1530,25 @@ bool BLE_Device::parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	return true;
 }
 
+bool BLE_Device::parsePlug( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+	if ( Device.DataSize < PLUG_DATA_SIZE )
+	{
+		return false;
+	}
+
+	uint8_t byte9 = Device.Data[ 10 ];
+	uint8_t byte11 = Device.Data[ 12 ];
+	uint8_t byte12 = Device.Data[ 13 ];
+	uint8_t byte13 = Device.Data[ 14 ];
+
+	SW_Device.Plug.state = ( ( byte9 & 0b10000000 ) != 0 );
+	SW_Device.Plug.wifiRSSI = byte11;
+	SW_Device.Plug.overload = ( ( byte12 & 0b10000000 ) != 0 );
+	SW_Device.Plug.power = ( ( byte12 & 0b01111111 ) * 256 ) + byte13;
+	return true;
+}
+
 bool BLE_Device::parseMeterPro( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
 	if ( Device.DataSize < METERPRO_DATA_SIZE )
@@ -1632,37 +1791,49 @@ CommandQ::~CommandQ()
 }
 
 // Searche the queue to see if that request is already there
-bool CommandQ::Find( const char* Address, const char* Data )
+bool CommandQ::Find( const char* Address, const uint8_t* Data, uint8_t DataLen )
 {
-	if ( ( Address == nullptr ) || ( Data == nullptr ) )
+	if ( ( Address == nullptr ) || ( Data == nullptr ) || ( DataLen == 0 ) )
 	{
 		return false;
 	}
 
-  for (int i = 0; i < NumQd; i++)
-  {
-  	BLE_COMMAND* entry = &Callbacks[ i ];
+	for ( int i = 0; i < NumQd; i++ )
+	{
+		int idx = QExit + i;
+		if ( idx >= QSize )
+		{
+			idx -= QSize;
+		}
+
+		BLE_COMMAND* entry = &Callbacks[ idx ];
 		if ( strncmp( entry->Address, Address, sizeof( entry->Address ) ) != 0 )
-    {
-      // No match so check next entry
-      continue;
-    }
+		{
+			// No match so check next entry
+			continue;
+		}
 
-		if ( memcmp( entry->Data, Data, entry->DataLen ) != 0 )
-    {
-      // No match so check next entry
-      continue;
-    }
+		if ( entry->DataLen != DataLen )
+		{
+			continue;
+		}
 
-    return true;
-  }
+		if ( memcmp( entry->Data, Data, DataLen ) != 0 )
+		{
+			// No match so check next entry
+			continue;
+		}
 
-  return false;
+		return true;
+	}
+
+	return false;
 }
 
-bool CommandQ::Push( const char* Address, const char* Data, const char* ReplyTo )
+bool CommandQ::Push( const char* Address, const uint8_t* Data, uint8_t DataLen, const char* ReplyTo )
 {
-	if ( ( Address == nullptr ) || ( Data == nullptr ) || ( ReplyTo == nullptr ) )
+	if ( ( Address == nullptr ) || ( Data == nullptr ) || ( ReplyTo == nullptr ) ||
+		 ( DataLen == 0 ) || ( DataLen > sizeof( BLE_COMMAND::Data ) ) )
 	{
 		return false;
 	}
@@ -1682,23 +1853,8 @@ bool CommandQ::Push( const char* Address, const char* Data, const char* ReplyTo 
 		entry->Address[ sizeof( entry->Address ) - 1 ] = 0;
 		strncpy( entry->ReplyTo, ReplyTo, sizeof( entry->ReplyTo ) - 1 );
 		entry->ReplyTo[ sizeof( entry->ReplyTo ) - 1 ] = 0;
-
-		uint8_t* buf = entry->Data;
-		char* endPtr = ( char* ) Data;
-
-		// Serial.printf( "Converting string %s to buffer: ", endPtr );
-
-		int bytes = 0;
-		do
-		{
-			endPtr++;
-			buf[ bytes ] = strtol( endPtr, &endPtr, 10 );
-			// Serial.printf( "%i, ", buf[ bytes ] );
-			bytes++;
-		} while ( ( endPtr != nullptr ) && ( *endPtr != 0 ) && ( bytes < 10 ) );
-
-		// Serial.printf( "bytes = %i\n", bytes );
-		entry->DataLen = bytes;
+		memcpy( entry->Data, Data, DataLen );
+		entry->DataLen = DataLen;
 
 		return true;
 	}
