@@ -15,7 +15,6 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
-#include <ArduinoJson.h>
 #include <AsyncUDP.h>            // https://github.com/espressif/arduino-esp32/tree/master/libraries/AsyncUDP
 #include <ESPAsyncWebServer.h>   // https://github.com/ESP32Async/ESPAsyncWebServer
 #include <ESPAsyncWiFiManager.h> // https://github.com/alanswx/ESPAsyncWiFiManager
@@ -33,6 +32,60 @@
 #include <esp_task_wdt.h>
 
 const char* version = "Hello! SwitchBot BLE Hub V2.10";
+
+static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* key, String& value )
+{
+	value = "";
+	if ( data == nullptr || len == 0 || key == nullptr || key[ 0 ] == '\0' )
+	{
+		return false;
+	}
+
+	String body;
+	body.reserve( len );
+	for ( size_t i = 0; i < len; i++ )
+	{
+		body += ( char )data[ i ];
+	}
+
+	const String keyToken = String( "\"" ) + key + "\"";
+	int keyPos = body.indexOf( keyToken );
+	if ( keyPos < 0 )
+	{
+		return false;
+	}
+
+	int colonPos = body.indexOf( ':', keyPos + keyToken.length() );
+	if ( colonPos < 0 )
+	{
+		return false;
+	}
+
+	int quoteStart = body.indexOf( '"', colonPos + 1 );
+	if ( quoteStart < 0 )
+	{
+		return false;
+	}
+
+	int quoteEnd = quoteStart + 1;
+	while ( quoteEnd < body.length() )
+	{
+		if ( body[ quoteEnd ] == '"' && body[ quoteEnd - 1 ] != '\\' )
+		{
+			break;
+		}
+		quoteEnd++;
+	}
+	if ( quoteEnd >= body.length() )
+	{
+		return false;
+	}
+
+	value = body.substring( quoteStart + 1, quoteEnd );
+	value.replace( "\\\"", "\"" );
+	value.replace( "\\\\", "\\" );
+	return true;
+}
 
 static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
 <!DOCTYPE html>
@@ -142,6 +195,8 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
       tr:hover td { background: #2d2d2d; }
       #stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.6rem; margin: 1rem 0; }
       .stat { background: #252526; border: 1px solid #3c3c3c; border-radius: 6px; padding: 0.5rem 0.6rem; }
+	.stat.clickable { cursor: pointer; border-color: #007acc; }
+	.stat.clickable:hover { background: #2a3440; }
       .stat .k { font-size: 0.75rem; color: #9aa0a6; }
       .stat .v { font-size: 1rem; color: #d4d4d4; font-weight: 600; }
       #refresh { margin-bottom: 1rem; padding: 6px 14px; background: #007acc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
@@ -156,6 +211,14 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
 			.q-fair { color: #f8d37a; border-color: #8f7a2f; }
 			.q-acceptable { color: #f0b57a; border-color: #8f5f2f; }
 			.q-poor { color: #f29a9a; border-color: #8f2f2f; }
+			#heapHistoryModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 20; }
+			#heapHistoryDialog { width: min(940px, 95vw); background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 0.9rem; }
+			#heapHistoryHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem; }
+			#heapHistoryTitle { color: #9cdcfe; font-weight: 700; }
+			#heapHistoryClose { background: #3c3c3c; color: #fff; border: none; border-radius: 5px; padding: 0.35rem 0.65rem; cursor: pointer; }
+			#heapHistoryClose:hover { background: #555; }
+			#heapHistoryCanvas { width: 100%; height: 320px; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 6px; display: block; }
+			#heapHistoryMeta { margin-top: 0.55rem; font-size: 0.8rem; color: #bbb; }
     </style>
   </head>
   <body>
@@ -172,6 +235,16 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
 			<span class="q q-poor">Poor (&lt;= -86 dBm)</span>
 		</div>
     <div id="tbl"></div>
+		<div id="heapHistoryModal" onclick="if(event.target===this) closeFreeHeapHistory()">
+			<div id="heapHistoryDialog">
+				<div id="heapHistoryHeader">
+					<div id="heapHistoryTitle">Free Heap History (last 1000 samples)</div>
+					<button id="heapHistoryClose" onclick="closeFreeHeapHistory()">Close</button>
+				</div>
+				<canvas id="heapHistoryCanvas"></canvas>
+				<div id="heapHistoryMeta"></div>
+			</div>
+		</div>
     <script>
       var groups = {};
       var sortPrefs = {};
@@ -180,9 +253,12 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
       var statsClockOffsetMs = 0;
       var nextStatsServerMs = 0;
       var waitingStatsRefresh = false;
+			var lastHeapHistory = null;
 
-      function mkStat(k, v) {
-        return "<div class=stat><div class=k>" + k + "</div><div class=v>" + v + "</div></div>";
+			function mkStat(k, v, clickFn) {
+				var cls = clickFn ? "stat clickable" : "stat";
+				var clickAttr = clickFn ? " onclick=\"" + clickFn + "()\"" : "";
+				return "<div class=\"" + cls + "\"" + clickAttr + "><div class=k>" + k + "</div><div class=v>" + v + "</div></div>";
       }
 
 			function formatUptime(ms) {
@@ -209,15 +285,113 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
         var h = "";
 				var serverNowMs = Date.now() - statsClockOffsetMs;
         h += mkStat("Next stats refresh", getStatsRemainingSeconds() + "s");
+				h += mkStat("Adverts/min", s.advertsSeenPerMinute || 0);
+				h += mkStat("Service UUID match/min", s.matchedServiceDataPerMinute || 0);
+				h += mkStat("Matched empty payload/min", s.matchedEmptyPayloadPerMinute || 0);
+				h += mkStat("Matched rejected/min", s.matchedRejectedPerMinute || 0);
 				h += mkStat("Updates/min", s.updatesPerMinute);
-        h += mkStat("Free heap", s.freeHeapNow);
-        h += mkStat("Largest block", s.largestHeapBlockNow);
-        h += mkStat("Heap min", s.heapMin);
-        h += mkStat("Heap max", s.heapMax);
-        h += mkStat("Largest min", s.heapLargestMin);
-				h += mkStat("Uptime (D, HH:MM:SS)", formatUptime(serverNowMs));
+				h += mkStat("Free heap", s.freeHeap, "openFreeHeapHistory");
+				h += mkStat("Largest block", s.largestHeapBlock);
+				h += mkStat("CPU usage", s.cpuUsage + "%");
+			h += mkStat("Uptime (D, HH:MM:SS)", formatUptime(serverNowMs));
         document.getElementById("stats").innerHTML = h;
       }
+
+			function closeFreeHeapHistory() {
+				document.getElementById("heapHistoryModal").style.display = "none";
+			}
+
+			function openFreeHeapHistory() {
+				document.getElementById("heapHistoryModal").style.display = "flex";
+				loadFreeHeapHistory();
+			}
+
+			function drawFreeHeapHistory(values, intervalMs) {
+				var canvas = document.getElementById("heapHistoryCanvas");
+				var meta = document.getElementById("heapHistoryMeta");
+				var ratio = window.devicePixelRatio || 1;
+				var cssW = canvas.clientWidth;
+				var cssH = canvas.clientHeight;
+				canvas.width = Math.max(1, Math.floor(cssW * ratio));
+				canvas.height = Math.max(1, Math.floor(cssH * ratio));
+				var ctx = canvas.getContext("2d");
+				ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+				ctx.clearRect(0, 0, cssW, cssH);
+
+				if (!values || !values.length) {
+					ctx.fillStyle = "#9aa0a6";
+					ctx.font = "14px sans-serif";
+					ctx.fillText("No history samples yet", 16, 28);
+					meta.textContent = "No data available";
+					return;
+				}
+
+				var minV = values[0], maxV = values[0];
+				for (var i = 1; i < values.length; i++) {
+					if (values[i] < minV) minV = values[i];
+					if (values[i] > maxV) maxV = values[i];
+				}
+				if (maxV === minV) {
+					minV = minV - 1;
+					maxV = maxV + 1;
+				}
+
+				var padL = 44, padR = 16, padT = 12, padB = 26;
+				var plotW = Math.max(1, cssW - padL - padR);
+				var plotH = Math.max(1, cssH - padT - padB);
+
+				ctx.strokeStyle = "#333";
+				ctx.lineWidth = 1;
+				for (var gy = 0; gy <= 4; gy++) {
+					var y = padT + (plotH * gy / 4);
+					ctx.beginPath();
+					ctx.moveTo(padL, y);
+					ctx.lineTo(padL + plotW, y);
+					ctx.stroke();
+				}
+
+				ctx.strokeStyle = "#4ec94e";
+				ctx.lineWidth = 2;
+				ctx.beginPath();
+				for (var j = 0; j < values.length; j++) {
+					var x = padL + (plotW * (values.length === 1 ? 0 : j / (values.length - 1)));
+					var t = (values[j] - minV) / (maxV - minV);
+					var y2 = padT + (1 - t) * plotH;
+					if (j === 0) ctx.moveTo(x, y2); else ctx.lineTo(x, y2);
+				}
+				ctx.stroke();
+
+				ctx.fillStyle = "#9aa0a6";
+				ctx.font = "12px sans-serif";
+				ctx.fillText(String(maxV), 6, padT + 4);
+				ctx.fillText(String(minV), 6, padT + plotH + 4);
+
+				var spanMs = intervalMs * (values.length - 1);
+				var spanHours = (spanMs / 3600000).toFixed(1);
+				var latest = values[values.length - 1];
+				meta.textContent = "Samples: " + values.length + " | Window: ~" + spanHours + "h | Min: " + minV + " | Max: " + maxV + " | Latest: " + latest;
+			}
+
+			function loadFreeHeapHistory() {
+				var meta = document.getElementById("heapHistoryMeta");
+				meta.textContent = "Loading...";
+				fetch("/api/v1/stats/free-heap-history", { headers: { Accept: "application/json" } })
+					.then(function(r) { return r.json(); })
+					.then(function(data) {
+						lastHeapHistory = data;
+						drawFreeHeapHistory(data.values || [], data.intervalMs || 60000);
+					})
+					.catch(function(e) {
+						meta.textContent = "Failed to load history: " + e;
+						drawFreeHeapHistory([], 60000);
+					});
+			}
+
+			window.addEventListener("resize", function() {
+				if (document.getElementById("heapHistoryModal").style.display === "flex" && lastHeapHistory) {
+					drawFreeHeapHistory(lastHeapHistory.values || [], lastHeapHistory.intervalMs || 60000);
+				}
+			});
 
       function startStatsTimer() {
         if (statsTimer !== null) return;
@@ -439,63 +613,74 @@ int BLENotifyLength = 0;
 uint32_t BLESending = 0;
 bool RebootRequired = false;
 int32_t NumUpdates = 0;
+int32_t NumAdvertsSeen = 0;
+int32_t NumMatchedServiceData = 0;
+int32_t NumMatchedEmptyPayload = 0;
+int32_t NumMatchedRejected = 0;
 int32_t NumUpdatesAt0 = 0;
 volatile int32_t LastUpdatesPerMinute = 0;
+volatile int32_t LastAdvertsSeenPerMinute = 0;
+volatile int32_t LastMatchedServiceDataPerMinute = 0;
+volatile int32_t LastMatchedEmptyPayloadPerMinute = 0;
+volatile int32_t LastMatchedRejectedPerMinute = 0;
 volatile uint32_t LastFreeHeap = 0;
 volatile uint32_t LastLargestHeapBlock = 0;
 volatile uint32_t LastStatsAt = 0;
+volatile uint8_t LastCpuUsagePercent = 0;
+static uint32_t PrevIdleRunTime = 0;
+static uint32_t PrevTotalRunTime = 0;
 volatile bool pendingSSEUpdate = false;
 volatile bool pendingSSEStats = false;
 unsigned long lastSSESend = 0;
 unsigned long lastSSEStatsSend = 0;
+const uint16_t FREE_HEAP_HISTORY_MAX = 1000;
+uint32_t FreeHeapHistory[ FREE_HEAP_HISTORY_MAX ];
+uint16_t FreeHeapHistoryStart = 0;
+uint16_t FreeHeapHistoryCount = 0;
 
-uint32_t HeapTelemetryStart = 0;
-uint32_t HeapTelemetryLast = 0;
-uint32_t HeapTelemetryLastAt = 0;
-uint32_t HeapTelemetryMin = 0xFFFFFFFF;
-uint32_t HeapTelemetryMax = 0;
-uint32_t HeapTelemetryLargestMin = 0xFFFFFFFF;
-
-void ReportHeapTelemetry( bool force )
+static void SampleCpuUsage()
 {
-	const uint32_t now = millis();
-	if ( !force && ( now - HeapTelemetryLastAt < 30000UL ) )
+	const UBaseType_t maxTasks = 32;
+	TaskStatus_t* taskBuffer = ( TaskStatus_t* )malloc( sizeof( TaskStatus_t ) * maxTasks );
+	if ( !taskBuffer ) return;
+
+	uint32_t totalRunTime = 0;
+	UBaseType_t taskCount = uxTaskGetSystemState( taskBuffer, maxTasks, &totalRunTime );
+
+	uint32_t idleRunTime = 0;
+	for ( UBaseType_t i = 0; i < taskCount; i++ )
 	{
-		return;
+		if ( strncmp( taskBuffer[ i ].pcTaskName, "IDLE", 4 ) == 0 )
+		{
+			idleRunTime += taskBuffer[ i ].ulRunTimeCounter;
+		}
 	}
+	free( taskBuffer );
 
-	const uint32_t freeHeap = esp_get_free_heap_size();
-	const uint32_t largestFreeBlock = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
-
-	if ( freeHeap < HeapTelemetryMin )
+	uint32_t deltaIdle = idleRunTime - PrevIdleRunTime;
+	uint32_t deltaTotal = ( totalRunTime - PrevTotalRunTime ) * ( uint32_t )portNUM_PROCESSORS;
+	if ( deltaTotal > 0 )
 	{
-		HeapTelemetryMin = freeHeap;
+		uint32_t idlePct = ( uint32_t )( ( ( uint64_t )deltaIdle * 100 ) / deltaTotal );
+		LastCpuUsagePercent = ( uint8_t )( idlePct < 100 ? 100 - idlePct : 0 );
 	}
-	if ( freeHeap > HeapTelemetryMax )
+	PrevIdleRunTime = idleRunTime;
+	PrevTotalRunTime = totalRunTime;
+}
+
+static void RecordFreeHeapHistory( uint32_t freeHeap )
+{
+	if ( FreeHeapHistoryCount < FREE_HEAP_HISTORY_MAX )
 	{
-		HeapTelemetryMax = freeHeap;
+		const uint16_t idx = ( FreeHeapHistoryStart + FreeHeapHistoryCount ) % FREE_HEAP_HISTORY_MAX;
+		FreeHeapHistory[ idx ] = freeHeap;
+		FreeHeapHistoryCount++;
 	}
-	if ( largestFreeBlock < HeapTelemetryLargestMin )
+	else
 	{
-		HeapTelemetryLargestMin = largestFreeBlock;
+		FreeHeapHistory[ FreeHeapHistoryStart ] = freeHeap;
+		FreeHeapHistoryStart = ( FreeHeapHistoryStart + 1 ) % FREE_HEAP_HISTORY_MAX;
 	}
-
-	const int32_t driftFromStart = ( int32_t )freeHeap - ( int32_t )HeapTelemetryStart;
-	const int32_t driftSinceLast = ( int32_t )freeHeap - ( int32_t )HeapTelemetryLast;
-
-	Serial.printf(
-		"[HEAP] now=%u start=%u driftStart=%ld drift30s=%ld min=%u max=%u largest=%u largestMin=%u\n",
-		freeHeap,
-		HeapTelemetryStart,
-		( long )driftFromStart,
-		( long )driftSinceLast,
-		HeapTelemetryMin,
-		HeapTelemetryMax,
-		largestFreeBlock,
-		HeapTelemetryLargestMin );
-
-	HeapTelemetryLast = freeHeap;
-	HeapTelemetryLastAt = now;
 }
 
 // The remote service we wish to connect to.
@@ -567,17 +752,28 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 	*/
 	void onResult( const BLEAdvertisedDevice* advertisedDevice ) override
 	{
+		NumAdvertsSeen++;
 		// We have found a device, let us now see if it contains the service we are looking for.
 		NimBLEUUID id1( ( uint16_t )0x0d00 );
 		NimBLEUUID id2( ( uint16_t )0xfd3d );
 		NimBLEUUID devicId = advertisedDevice->getServiceDataUUID();
 		if ( ( devicId == id1 ) || ( devicId == id2 ) )
 		{
+			if ( advertisedDevice->getServiceData().length() == 0 )
+			{
+				NumMatchedEmptyPayload++;
+				return;
+			}
+			NumMatchedServiceData++;
 			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* )advertisedDevice->getServiceData().data(), advertisedDevice->getServiceData().length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length() ) )
 			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 				NumUpdates++;
 				pendingSSEUpdate = true;
+			}
+			else
+			{
+				NumMatchedRejected++;
 			}
 			// else
 			// {
@@ -647,13 +843,11 @@ void setup()
 			    if ( request->url() == "/api/v1/callback/add" )
 			    {
 				    Serial.println( "Received request for /api/v1/callback/add" );
-				    JsonDocument jsonDoc;
-
-				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
+				    String uri;
+				    if ( TryGetJsonStringField( data, len, "uri", uri ) && uri.length() > 0 )
 				    {
-					    JsonObject callbackAddress = jsonDoc.as<JsonObject>();
 					    lockCallbacks();
-					    bool addOk = OurCallbacks.Add( callbackAddress[ "uri" ], millis() );
+					    bool addOk = OurCallbacks.Add( uri.c_str(), millis() );
 					    unlockCallbacks();
 					    if ( addOk )
 					    {
@@ -674,13 +868,11 @@ void setup()
 			    else if ( request->url() == "/api/v1/callback/remove" )
 			    {
 				    Serial.println( "Received request for /api/v1/callback/remove" );
-				    JsonDocument jsonDoc;
-
-				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
+				    String uri;
+				    if ( TryGetJsonStringField( data, len, "uri", uri ) && uri.length() > 0 )
 				    {
-					    JsonObject callbackAddress = jsonDoc.as<JsonObject>();
 					    lockCallbacks();
-					    bool removeOk = OurCallbacks.Remove( ( const char* )callbackAddress[ "uri" ] );
+					    bool removeOk = OurCallbacks.Remove( uri.c_str() );
 					    unlockCallbacks();
 					    if ( removeOk )
 					    {
@@ -698,28 +890,27 @@ void setup()
 			    }
 			    else if ( request->url() == "/api/v1/device/write" )
 			    {
-				    JsonDocument jsonDoc;
+				    String clientAddress;
+				    String dataToWrite;
+				    bool hasAddress = TryGetJsonStringField( data, len, "address", clientAddress );
+				    bool hasData = TryGetJsonStringField( data, len, "data", dataToWrite );
 
-				    if ( DeserializationError::Ok == deserializeJson( jsonDoc, ( const char* )data ) )
+				    if ( hasAddress && hasData && clientAddress.length() > 0 )
 				    {
-					    JsonObject writeParameters = jsonDoc.as<JsonObject>();
-					    const char* clientAddress = writeParameters[ "address" ] | "";
-
 					    // Check that we have seen that device
-					    int deviceIdx = BLE_Devices.FindDevice( clientAddress );
+					    int deviceIdx = BLE_Devices.FindDevice( clientAddress.c_str() );
 					    if ( deviceIdx >= 0 )
 					    {
-						    const char* dataToWrite = writeParameters[ "data" ] | "";
 							String sourcIP = IPAddress( request->client()->getRemoteAddress() ).toString();
-						    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress, dataToWrite, ( unsigned int )strlen( dataToWrite ), sourcIP.c_str() );
+						    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), ( unsigned int )dataToWrite.length(), sourcIP.c_str() );
 
-						    if ( BLECommandQ.Find( clientAddress, dataToWrite ) )
+						    if ( BLECommandQ.Find( clientAddress.c_str(), dataToWrite.c_str() ) )
 						    {
 							    // Same command already queued
 							    request->send( 200, "text/plain", "OK" );
 							    Serial.println( "Command already in the Q" );
 						    }
-						    else if ( BLECommandQ.Push( clientAddress, dataToWrite, sourcIP.c_str() ) )
+						    else if ( BLECommandQ.Push( clientAddress.c_str(), dataToWrite.c_str(), sourcIP.c_str() ) )
 						    {
 							    request->send( 200, "text/plain", "OK" );
 						    }
@@ -732,7 +923,7 @@ void setup()
 					    else
 					    {
 						    request->send( 422, "text/plain", "Unknown device" );
-						    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress );
+						    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress.c_str() );
 					    }
 				    }
 				    else
@@ -783,25 +974,48 @@ void setup()
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/stats/free-heap-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		String out;
+		out.reserve( 14000 );
+		out = "{";
+		out += "\"intervalMs\":60000";
+		out += ",\"maxPoints\":" + String( FREE_HEAP_HISTORY_MAX );
+		out += ",\"count\":" + String( FreeHeapHistoryCount );
+		out += ",\"values\":[";
+		for ( uint16_t i = 0; i < FreeHeapHistoryCount; i++ )
+		{
+			const uint16_t idx = ( FreeHeapHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
+			out += String( FreeHeapHistory[ idx ] );
+			if ( i + 1 < FreeHeapHistoryCount )
+			{
+				out += ",";
+			}
+		}
+		out += "]}";
+
+		request->send( 200, "application/json", out );
+		digitalWrite( led, 0 );
+	} );
+
 		server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
 			digitalWrite( led, 1 );
 
-			JsonDocument stats;
-			stats[ "uptimeMs" ] = millis();
-			stats[ "updatesPerMinute" ] = LastUpdatesPerMinute;
-			stats[ "currentMinuteUpdates" ] = NumUpdates;
-			stats[ "noUpdateMinutes" ] = NumUpdatesAt0;
-			stats[ "freeHeap" ] = LastFreeHeap;
-			stats[ "largestHeapBlock" ] = LastLargestHeapBlock;
-			stats[ "freeHeapNow" ] = esp_get_free_heap_size();
-			stats[ "largestHeapBlockNow" ] = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
-			stats[ "heapMin" ] = HeapTelemetryMin;
-			stats[ "heapMax" ] = HeapTelemetryMax;
-			stats[ "heapLargestMin" ] = HeapTelemetryLargestMin;
-			stats[ "lastStatsAtMs" ] = LastStatsAt;
-
-			String out;
-			serializeJson( stats, out );
+			String out = "{";
+			out += "\"uptimeMs\":" + String( millis() );
+			out += ",\"advertsSeenPerMinute\":" + String( LastAdvertsSeenPerMinute );
+			out += ",\"matchedServiceDataPerMinute\":" + String( LastMatchedServiceDataPerMinute );
+			out += ",\"matchedEmptyPayloadPerMinute\":" + String( LastMatchedEmptyPayloadPerMinute );
+			out += ",\"matchedRejectedPerMinute\":" + String( LastMatchedRejectedPerMinute );
+			out += ",\"updatesPerMinute\":" + String( LastUpdatesPerMinute );
+			out += ",\"currentMinuteUpdates\":" + String( NumUpdates );
+			out += ",\"noUpdateMinutes\":" + String( NumUpdatesAt0 );
+			out += ",\"freeHeap\":" + String( LastFreeHeap );
+			out += ",\"largestHeapBlock\":" + String( LastLargestHeapBlock );
+			out += ",\"lastStatsAtMs\":" + String( LastStatsAt );
+			out += ",\"cpuUsage\":" + String( LastCpuUsagePercent );
+			out += "}";
 			request->send( 200, "application/json", out );
 
 			digitalWrite( led, 0 );
@@ -858,16 +1072,11 @@ void setup()
 	WiFi.macAddress( mac );
 	sprintf( macAddress, "%0.2x:%0.2x:%0.2x:%0.2x:%0.2x:%0.2x", mac[ 5 ], mac[ 4 ], mac[ 3 ], mac[ 2 ], mac[ 1 ], mac[ 0 ] );
 
-	HeapTelemetryStart = esp_get_free_heap_size();
-	HeapTelemetryLast = HeapTelemetryStart;
-	HeapTelemetryLastAt = millis();
-	HeapTelemetryMin = HeapTelemetryStart;
-	HeapTelemetryMax = HeapTelemetryStart;
-	HeapTelemetryLargestMin = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
-	LastFreeHeap = HeapTelemetryStart;
-	LastLargestHeapBlock = HeapTelemetryLargestMin;
+	LastFreeHeap = esp_get_free_heap_size();
+	LastLargestHeapBlock = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
 	LastStatsAt = millis();
-	ReportHeapTelemetry( true );
+	RecordFreeHeapHistory( LastFreeHeap );
+	SampleCpuUsage();
 
 	if ( udp.listenMulticast( IPAddress( 239, 1, 2, 3 ), 1234 ) )
 	{
@@ -948,8 +1157,16 @@ void loop()
 				RebootRequired = true;
 			}
 
+			LastAdvertsSeenPerMinute = NumAdvertsSeen;
+			LastMatchedServiceDataPerMinute = NumMatchedServiceData;
+			LastMatchedEmptyPayloadPerMinute = NumMatchedEmptyPayload;
+			LastMatchedRejectedPerMinute = NumMatchedRejected;
 			LastUpdatesPerMinute = NumUpdates;
-			Serial.printf( "BLE updates %i per minute\n", NumUpdates );
+			Serial.printf( "BLE adverts %i/min, UUID matches %i/min, empty payload %i/min, rejected %i/min, updates %i/min\n", NumAdvertsSeen, NumMatchedServiceData, NumMatchedEmptyPayload, NumMatchedRejected, NumUpdates );
+			NumAdvertsSeen = 0;
+			NumMatchedServiceData = 0;
+			NumMatchedEmptyPayload = 0;
+			NumMatchedRejected = 0;
 			NumUpdates = 0;
 
 			// Report heap available
@@ -959,8 +1176,9 @@ void loop()
 			LastLargestHeapBlock = largestHeapBlock;
 			LastStatsAt = millis();
 			pendingSSEStats = true;
-			Serial.printf( "\nFree Heap %i, Largest block %i\n\n", freeHeap, largestHeapBlock );
-			ReportHeapTelemetry( true );
+			RecordFreeHeapHistory( freeHeap );
+			SampleCpuUsage();
+			Serial.printf( "\nFree Heap %i, Largest block %i, CPU %i%%\n\n", freeHeap, largestHeapBlock, LastCpuUsagePercent );
 			if ( largestHeapBlock < 30000 )
 			{
 				Serial.println( "Low heap, rebooting" );
@@ -996,6 +1214,8 @@ void loop()
 		lockCallbacks();
 		OurCallbacks.Check( millis() ); // Check if any of the registered callbacks have timedout
 		unlockCallbacks();
+
+		vTaskDelay( pdMS_TO_TICKS( 1 ) ); // yield to let other tasks run and reduce idle CPU burn on core 1
 	} // end of endless loop ;-)
 
 } // End of loop

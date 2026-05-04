@@ -86,6 +86,16 @@ void printHex( uint8_t* data, uint8_t len )
 
 bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t* ManufactureData, uint16_t ManufactureDataSize )
 {
+	if ( BLEData == nullptr || BLEDataSize == 0 )
+	{
+		return false;
+	}
+
+	if ( ManufactureData == nullptr && ManufactureDataSize > 0 )
+	{
+		return false;
+	}
+
 	int expected_size = 0;
 
 	switch ( Type )
@@ -359,6 +369,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 			BLE_devices[ NumDevices ].Data[ 0 ] = WATERLEAK_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
+			break;
 		}
 
 		case METERPRO_DATA_ID:
@@ -368,6 +379,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 			BLE_devices[ NumDevices ].Data[ 0 ] = METERPRO_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
+			break;
 		}
 
 		case METERPROCO2_DATA_ID:
@@ -377,6 +389,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 			BLE_devices[ NumDevices ].Data[ 0 ] = METERPROCO2_DATA_ID;
 			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
+			break;
 		}
 
 		default:
