@@ -34,7 +34,7 @@
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.12";
+const char* version = "Hello! SwitchBot BLE Hub V2.14";
 
 static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* key, String& value )
 {
@@ -341,7 +341,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
     <div class="wrap">
       <div class="card">
         <h1>SwitchBot BLE Hub</h1>
-        <p class="ver">Version 2.12</p>
+        <p class="ver">Version 2.14</p>
         <div class="links">
           <a class="btn" href="/update">Update firmware</a>
 					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
@@ -352,6 +352,141 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
       </div>
     </div>
   </body>
+</html>
+)HTMLEOF";
+
+static const char OTA_UPDATE_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>SwitchBot BLE Hub OTA</title>
+		<style>
+			body { margin: 0; background: #1e1e1e; color: #d4d4d4; font-family: sans-serif; }
+			.wrap { max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+			.card { background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 1.2rem 1.1rem; }
+			h1 { margin: 0 0 .25rem; color: #9cdcfe; font-size: 1.35rem; }
+			.hint { color: #a0a0a0; margin: 0 0 1rem; font-size: .95rem; }
+			input[type=file] { display: none; }
+			.file-row { margin-bottom: .6rem; }
+			.file-btn { display: inline-block; background: #007acc; color: #fff; border: 0; border-radius: 6px; padding: .6rem .9rem; font-weight: 600; font-size: 1rem; line-height: 1.2; cursor: pointer; text-decoration: none; }
+			.file-btn:hover { background: #005f9e; }
+			.file-name { margin-top: .5rem; color: #d4d4d4; font-size: .92rem; word-break: break-all; white-space: normal; }
+			input[type=submit] { background: #007acc; color: #fff; border: 0; border-radius: 6px; padding: .6rem .9rem; font-weight: 600; font-size: 1rem; line-height: 1.2; cursor: pointer; }
+			input[type=submit]:hover { background: #005f9e; }
+			input[type=submit]:disabled { background: #4e5a63; cursor: not-allowed; }
+			.progress-wrap { margin-top: .8rem; display: none; }
+			.progress-label { font-size: .9rem; color: #c8c8c8; margin-bottom: .3rem; }
+			.progress-rail { width: 100%; height: 12px; background: #1b1b1b; border: 1px solid #3a3a3a; border-radius: 8px; overflow: hidden; }
+			.progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #007acc, #00a3ff); transition: width .12s linear; }
+			.status { margin-top: .6rem; color: #d4d4d4; min-height: 1.2rem; font-size: .92rem; }
+			.back { display: inline-block; margin-top: .9rem; color: #9cdcfe; text-decoration: none; }
+		</style>
+	</head>
+	<body>
+		<div class="wrap">
+			<div class="card">
+				<h1>Firmware Update</h1>
+				<p class="hint">Upload firmware app image only (.ino.bin). Do not use merged images.</p>
+				<form id="otaForm" method="POST" action="/ota?name=firmware" enctype="multipart/form-data">
+					<div class="file-row">
+						<label class="file-btn" for="firmwareFile">Choose Firmware File</label>
+						<input id="firmwareFile" type="file" accept=".bin,.bin.gz" name="firmware" required>
+						<div id="fileName" class="file-name">No file selected. Example: SwitchBotBLEHub.ino.bin</div>
+					</div>
+					<input id="uploadBtn" type="submit" value="Update Firmware">
+				</form>
+				<div id="progressWrap" class="progress-wrap">
+					<div id="progressLabel" class="progress-label">Preparing upload...</div>
+					<div class="progress-rail"><div id="progressFill" class="progress-fill"></div></div>
+				</div>
+				<div id="status" class="status"></div>
+				<a class="back" href="/">Back to Home</a>
+			</div>
+		</div>
+		<script>
+			(function() {
+				var form = document.getElementById('otaForm');
+				var fileInput = document.getElementById('firmwareFile');
+				var uploadBtn = document.getElementById('uploadBtn');
+				var fileNameEl = document.getElementById('fileName');
+				var progressWrap = document.getElementById('progressWrap');
+				var progressFill = document.getElementById('progressFill');
+				var progressLabel = document.getElementById('progressLabel');
+				var statusEl = document.getElementById('status');
+
+				function setProgress(percent, label) {
+					var safe = Math.max(0, Math.min(100, percent || 0));
+					progressFill.style.width = safe + '%';
+					progressLabel.textContent = label || ('Uploading ' + safe + '%');
+				}
+
+				fileInput.addEventListener('change', function() {
+					if (fileInput.files && fileInput.files.length > 0) {
+						fileNameEl.textContent = fileInput.files[0].name;
+					} else {
+						fileNameEl.textContent = 'No file selected. Example: SwitchBotBLEHub.ino.bin';
+					}
+				});
+
+				form.addEventListener('submit', function(ev) {
+					ev.preventDefault();
+					if (!fileInput.files || !fileInput.files.length) {
+						statusEl.textContent = 'Select a firmware file first.';
+						return;
+					}
+
+					var body = new FormData();
+					body.append('firmware', fileInput.files[0]);
+
+					uploadBtn.disabled = true;
+					statusEl.textContent = 'Preparing...';
+					progressWrap.style.display = 'block';
+					setProgress(0, 'Stopping BLE scan...');
+
+					function startUpload() {
+						statusEl.textContent = 'Uploading...';
+						setProgress(0, 'Starting upload...');
+						var uploadComplete = false;
+						var xhr = new XMLHttpRequest();
+						xhr.open('POST', '/ota?name=firmware', true);
+						xhr.upload.onprogress = function(e) {
+							if (e.lengthComputable) {
+								var pct = Math.round((e.loaded / e.total) * 100);
+								setProgress(pct, 'Uploading ' + pct + '%');
+							}
+						};
+						xhr.upload.onload = function() {
+							uploadComplete = true;
+							progressWrap.style.display = 'none';
+							statusEl.textContent = 'Programming... Please wait while the device restarts.';
+							setTimeout(function() {
+								window.location.href = '/';
+							}, 5000);
+						};
+						xhr.onload = function() {
+							if (!uploadComplete) {
+								uploadBtn.disabled = false;
+								statusEl.textContent = 'Update failed (HTTP ' + xhr.status + ').';
+							}
+						};
+						xhr.onerror = function() {
+							if (!uploadComplete) {
+								uploadBtn.disabled = false;
+								statusEl.textContent = 'Upload failed due to network error.';
+							}
+						};
+						xhr.send(body);
+					}
+
+					fetch('/api/v1/ota/prepare', {method: 'POST'})
+						.then(function() { startUpload(); })
+						.catch(function() { startUpload(); });
+				});
+			})();
+		</script>
+	</body>
 </html>
 )HTMLEOF";
 
@@ -1579,6 +1714,7 @@ int BLENotifyLength = 0;
 uint32_t BLESending = 0;
 volatile bool BLECommandConnectInProgress = false;
 bool RebootRequired = false;
+bool otaInProgress = false;
 
 // Single shared response buffer used by all HTTP GET handlers.
 // request->send() copies the data before returning so reuse is safe.
@@ -2325,6 +2461,12 @@ void setup()
 
 	server.on( "/", handleRoot );
 
+	server.on( "/update", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+		request->send( 200, "text/html", OTA_UPDATE_HTML );
+		digitalWrite( led, 0 );
+	} );
+
 	server.on( "/api/v1/devices/table", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 		Serial.println( "Received request for devices table" );
@@ -2365,6 +2507,16 @@ void setup()
 	    []( AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total ) {
 		    if ( request->method() != HTTP_POST )
 		    {
+			    return;
+		    }
+
+		    String requestUrl = request->url();
+		    if ( ( requestUrl != "/api/v1/callback/add" ) &&
+		         ( requestUrl != "/api/v1/callback/remove" ) &&
+		         ( requestUrl != "/api/v1/device/write" ) )
+		    {
+			    // Leave unrelated POST routes (e.g. OTA /ota multipart upload)
+			    // to their dedicated handlers.
 			    return;
 		    }
 
@@ -2412,7 +2564,7 @@ void setup()
 		    const uint8_t* payloadData = ( const uint8_t* )payload.c_str();
 		    size_t payloadLen = payload.length();
 
-		    if ( request->url() == "/api/v1/callback/add" )
+		    if ( requestUrl == "/api/v1/callback/add" )
 		    {
 			    Serial.println( "Received request for /api/v1/callback/add" );
 			    String uri;
@@ -2437,7 +2589,7 @@ void setup()
 				    Serial.println( "Callback error 400" );
 			    }
 		    }
-		    else if ( request->url() == "/api/v1/callback/remove" )
+		    else if ( requestUrl == "/api/v1/callback/remove" )
 		    {
 			    Serial.println( "Received request for /api/v1/callback/remove" );
 			    String uri;
@@ -2460,7 +2612,7 @@ void setup()
 				    request->send( 400, "text/plain", "Bad Request" );
 			    }
 		    }
-		    else if ( request->url() == "/api/v1/device/write" )
+		    else if ( requestUrl == "/api/v1/device/write" )
 		    {
 				String sourceIP = IPAddress( request->client()->getRemoteAddress() ).toString();
 				Serial.printf( "Received /api/v1/device/write from %s payloadLen=%u payload=%s\n",
@@ -2835,9 +2987,20 @@ void setup()
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/ota/prepare", HTTP_POST, []( AsyncWebServerRequest* request ) {
+		if ( !otaInProgress )
+		{
+			otaInProgress = true;
+			BLEScan* pBLEScan = BLEDevice::getScan();
+			pBLEScan->stop();
+			Serial.println( "BLE scan stopped for OTA upload" );
+		}
+		request->send( 200, "application/json", "{\"ok\":true}" );
+	} );
+
 	//	server.onNotFound( handleNotFound );
 
-	_updateServer.setup( &server );
+	_updateServer.setup( &server, "/ota" );
 
 	server.addHandler( &bleEvents );
 	server.begin();
