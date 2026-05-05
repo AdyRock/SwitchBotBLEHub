@@ -346,6 +346,10 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			.unknown-table th, .unknown-table td { border-bottom: 1px solid #3c3c3c; padding: 0.45rem 0.5rem; text-align: left; }
 			.unknown-table th { color: #9cdcfe; font-weight: 600; }
 			.unknown-empty { color: #9aa0a6; font-size: 0.85rem; }
+			.section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin: 0 0 0.6rem; }
+			.section-head h2 { margin: 0; }
+			.clear-btn { background: #3c3c3c; color: #fff; border: 1px solid #555; border-radius: 6px; padding: 0.3rem 0.55rem; font-size: 0.78rem; cursor: pointer; }
+			.clear-btn:hover { background: #555; }
 		</style>
 	</head>
 	<body>
@@ -365,7 +369,10 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 					<div class="stats" id="memStats"></div>
 				</section>
 				<section class="block">
-					<h2 id="unknownDevicesTitle">Unknown Devices</h2>
+					<div class="section-head">
+						<h2 id="unknownDevicesTitle">Unknown Devices</h2>
+						<button class="clear-btn" type="button" onclick="clearUnknownDevices()">Clear</button>
+					</div>
 					<div class="unknown-wrap" id="unknownTypes"></div>
 				</section>
 			</div>
@@ -539,6 +546,23 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				var titleEl = document.getElementById('unknownDevicesTitle');
 				if (titleEl) titleEl.textContent = 'Unknown Devices (' + unknownTypesData.length + ')';
 				sortAndRenderUnknownTypes();
+			}
+
+			function clearUnknownDevices() {
+				fetch('/api/v1/stats/unknown-types/clear', { method: 'POST' })
+					.then(function(r) {
+						if (!r.ok) throw new Error('HTTP ' + r.status);
+						return r.json();
+					})
+					.then(function() {
+						renderUnknownTypes([]);
+						loadStats();
+					})
+					.catch(function(e) {
+						statsErrorText = String(e);
+						statsErrorUntilMs = Date.now() + 15000;
+						updateStatsMeta();
+					});
 			}
 
 			function closeFreeHeapHistory() {
@@ -1478,7 +1502,8 @@ static String JsonEscape( const char* s )
 	out.reserve( strlen( s ) + 8 );
 	for ( const char* p = s; *p != 0; p++ )
 	{
-		switch ( *p )
+		const uint8_t ch = ( uint8_t )*p;
+		switch ( ch )
 		{
 			case '\\':
 				out += "\\\\";
@@ -1496,12 +1521,56 @@ static String JsonEscape( const char* s )
 				out += "\\t";
 				break;
 			default:
-				out += *p;
+				if ( ch < 0x20 )
+				{
+					char esc[ 7 ];
+					snprintf( esc, sizeof( esc ), "\\u%04X", ( unsigned int )ch );
+					out += esc;
+				}
+				else
+				{
+					out += ( char )ch;
+				}
 				break;
 		}
 	}
 
 	return out;
+}
+
+static bool IsHexDigitChar( char c )
+{
+	return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) || ( c >= 'A' && c <= 'F' );
+}
+
+static bool IsValidMacAddress( const char* mac )
+{
+	if ( mac == nullptr )
+	{
+		return false;
+	}
+
+	for ( int i = 0; i < 17; i++ )
+	{
+		char c = mac[ i ];
+		if ( c == '\0' )
+		{
+			return false;
+		}
+		if ( ( i % 3 ) == 2 )
+		{
+			if ( c != ':' )
+			{
+				return false;
+			}
+		}
+		else if ( !IsHexDigitChar( c ) )
+		{
+			return false;
+		}
+	}
+
+	return mac[ 17 ] == '\0';
 }
 
 static void RecordPushUpdate( const char* target, const char* payload, int bytes, int httpCode )
@@ -1640,10 +1709,22 @@ static void UpdateBleCommandResult( const char* sourceIp, const char* address, c
 
 static void RecordUnknownType( uint8_t type, const char* mac, bool hasSubtype = false, uint8_t b0 = 0, uint8_t b1 = 0, uint8_t b2 = 0 )
 {
+	char safeMac[ 18 ];
+	if ( IsValidMacAddress( mac ) )
+	{
+		strncpy( safeMac, mac, sizeof( safeMac ) - 1 );
+		safeMac[ sizeof( safeMac ) - 1 ] = '\0';
+	}
+	else
+	{
+		strncpy( safeMac, "??:??:??:??:??:??", sizeof( safeMac ) - 1 );
+		safeMac[ sizeof( safeMac ) - 1 ] = '\0';
+	}
+
 	for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
 	{
-		if ( mac != nullptr && UnknownTypes[ i ].mac[ 0 ] != '\0' &&
-			 strncmp( UnknownTypes[ i ].mac, mac, sizeof( UnknownTypes[ i ].mac ) ) == 0 )
+		if ( UnknownTypes[ i ].mac[ 0 ] != '\0' &&
+			 strncmp( UnknownTypes[ i ].mac, safeMac, sizeof( UnknownTypes[ i ].mac ) ) == 0 )
 		{
 			// Update type info in case it changes and increment count
 			UnknownTypes[ i ].type = type;
@@ -1663,15 +1744,8 @@ static void RecordUnknownType( uint8_t type, const char* mac, bool hasSubtype = 
 		UnknownTypes[ UnknownTypeCount ].subtypeB0 = b0;
 		UnknownTypes[ UnknownTypeCount ].subtypeB1 = b1;
 		UnknownTypes[ UnknownTypeCount ].subtypeB2 = b2;
-		if ( mac != nullptr )
-		{
-			strncpy( UnknownTypes[ UnknownTypeCount ].mac, mac, sizeof( UnknownTypes[ UnknownTypeCount ].mac ) - 1 );
-			UnknownTypes[ UnknownTypeCount ].mac[ sizeof( UnknownTypes[ UnknownTypeCount ].mac ) - 1 ] = '\0';
-		}
-		else
-		{
-			UnknownTypes[ UnknownTypeCount ].mac[ 0 ] = '\0';
-		}
+		strncpy( UnknownTypes[ UnknownTypeCount ].mac, safeMac, sizeof( UnknownTypes[ UnknownTypeCount ].mac ) - 1 );
+		UnknownTypes[ UnknownTypeCount ].mac[ sizeof( UnknownTypes[ UnknownTypeCount ].mac ) - 1 ] = '\0';
 		UnknownTypes[ UnknownTypeCount ].count = 1;
 		UnknownTypeCount++;
 	}
@@ -1878,6 +1952,8 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 		NimBLEUUID devicId = advertisedDevice->getServiceDataUUID();
 		if ( ( devicId == id1 ) || ( devicId == id2 ) )
 		{
+			std::string deviceAddress = advertisedDevice->getAddress().toString();
+			const char* deviceAddressCStr = deviceAddress.c_str();
 			const std::string& serviceData = advertisedDevice->getServiceData();
 			if ( serviceData.length() == 0 )
 			{
@@ -1889,7 +1965,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			bool dataUpdated = false;
 			bool failedValidation = false;
 			bool unknownType = false;
-			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length(), &dataUpdated, &failedValidation, &unknownType ) )
+			if ( BLE_Devices.AddDevice( deviceAddressCStr, advertisedDevice->getRSSI(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length(), &dataUpdated, &failedValidation, &unknownType ) )
 			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 				NumUpdates++;
@@ -1903,14 +1979,13 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			{
 				if ( failedValidation && unknownType )
 				{
-					const char* devMac = advertisedDevice->getAddress().toString().c_str();
 					if ( serviceDataBuf[ 0 ] == 0 && serviceData.length() >= 7 )
 					{
-						RecordUnknownType( serviceDataBuf[ 0 ], devMac, true, serviceDataBuf[ 4 ], serviceDataBuf[ 5 ], serviceDataBuf[ 6 ] );
+						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddressCStr, true, serviceDataBuf[ 4 ], serviceDataBuf[ 5 ], serviceDataBuf[ 6 ] );
 					}
 					else
 					{
-						RecordUnknownType( serviceDataBuf[ 0 ], devMac );
+						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddressCStr );
 					}
 					NumMatchedRejected++;
 				}
@@ -2323,6 +2398,27 @@ void setup()
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/stats/unknown-types/clear", HTTP_POST, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		lockHistory();
+		UnknownTypeCount = 0;
+		for ( uint8_t i = 0; i < UNKNOWN_TYPE_MAX; i++ )
+		{
+			UnknownTypes[ i ].type = 0;
+			UnknownTypes[ i ].subtypeB0 = 0;
+			UnknownTypes[ i ].subtypeB1 = 0;
+			UnknownTypes[ i ].subtypeB2 = 0;
+			UnknownTypes[ i ].hasSubtype = false;
+			UnknownTypes[ i ].mac[ 0 ] = '\0';
+			UnknownTypes[ i ].count = 0;
+		}
+		unlockHistory();
+
+		request->send( 200, "application/json", "{\"ok\":true,\"message\":\"Unknown devices cleared\"}" );
+		digitalWrite( led, 0 );
+	} );
+
 	server.on( "/api/v1/homey/monitor", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 
@@ -2407,45 +2503,46 @@ void setup()
 		server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
 			digitalWrite( led, 1 );
 
-			String out = "{";
-			out += "\"uptimeMs\":" + String( millis() );
-			out += ",\"advertsSeenPerMinute\":" + String( LastAdvertsSeenPerMinute );
-			out += ",\"matchedServiceDataPerMinute\":" + String( LastMatchedServiceDataPerMinute );
-			out += ",\"matchedEmptyPayloadPerMinute\":" + String( LastMatchedEmptyPayloadPerMinute );
-			out += ",\"matchedRejectedPerMinute\":" + String( LastMatchedRejectedPerMinute );
-			out += ",\"badDataRejectedPerMinute\":" + String( LastBadDataRejectedPerMinute );
-			out += ",\"updatesPerMinute\":" + String( LastUpdatesPerMinute );
-			out += ",\"actualDataUpdatesPerMinute\":" + String( LastActualDataUpdatesPerMinute );
-			out += ",\"currentMinuteUpdates\":" + String( NumUpdates );
-			out += ",\"noUpdateMinutes\":" + String( NumUpdatesAt0 );
-			out += ",\"freeHeap\":" + String( LastFreeHeap );
-			out += ",\"largestHeapBlock\":" + String( LastLargestHeapBlock );
-			out += ",\"lastStatsAtMs\":" + String( LastStatsAt );
-			out += ",\"statsIntervalMs\":" + String( STATS_SAMPLE_MS );
-			out += ",\"cpuUsage\":" + String( LastCpuUsagePercent );
-			out += ",\"unknownTypes\":[";
+			static char statsBuf[ 10240 ];
+			int pos = 0;
+			int rem = ( int )sizeof( statsBuf );
+#define STATS_APPEND( ... ) \
+			do { int _n = snprintf( statsBuf + pos, rem, __VA_ARGS__ ); if ( _n > 0 ) { pos += _n; rem -= _n; } } while ( 0 )
+
+			STATS_APPEND( "{" );
+			STATS_APPEND( "\"uptimeMs\":%lu", ( unsigned long )millis() );
+			STATS_APPEND( ",\"advertsSeenPerMinute\":%ld", ( long )LastAdvertsSeenPerMinute );
+			STATS_APPEND( ",\"matchedServiceDataPerMinute\":%ld", ( long )LastMatchedServiceDataPerMinute );
+			STATS_APPEND( ",\"matchedEmptyPayloadPerMinute\":%ld", ( long )LastMatchedEmptyPayloadPerMinute );
+			STATS_APPEND( ",\"matchedRejectedPerMinute\":%ld", ( long )LastMatchedRejectedPerMinute );
+			STATS_APPEND( ",\"badDataRejectedPerMinute\":%ld", ( long )LastBadDataRejectedPerMinute );
+			STATS_APPEND( ",\"updatesPerMinute\":%ld", ( long )LastUpdatesPerMinute );
+			STATS_APPEND( ",\"actualDataUpdatesPerMinute\":%ld", ( long )LastActualDataUpdatesPerMinute );
+			STATS_APPEND( ",\"currentMinuteUpdates\":%ld", ( long )NumUpdates );
+			STATS_APPEND( ",\"noUpdateMinutes\":%lu", ( unsigned long )NumUpdatesAt0 );
+			STATS_APPEND( ",\"freeHeap\":%lu", ( unsigned long )LastFreeHeap );
+			STATS_APPEND( ",\"largestHeapBlock\":%lu", ( unsigned long )LastLargestHeapBlock );
+			STATS_APPEND( ",\"lastStatsAtMs\":%lu", ( unsigned long )LastStatsAt );
+			STATS_APPEND( ",\"statsIntervalMs\":%lu", ( unsigned long )STATS_SAMPLE_MS );
+			STATS_APPEND( ",\"cpuUsage\":%u", ( unsigned )LastCpuUsagePercent );
+			STATS_APPEND( ",\"unknownTypes\":[" );
 			for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
 			{
-				out += "{\"type\":" + String( UnknownTypes[ i ].type );
+				STATS_APPEND( "%s{\"type\":%u", i > 0 ? "," : "", ( unsigned )UnknownTypes[ i ].type );
 				if ( UnknownTypes[ i ].hasSubtype )
 				{
-					char subtypeBuf[ 20 ];
-					snprintf( subtypeBuf, sizeof( subtypeBuf ), "%02X%02X%02X", UnknownTypes[ i ].subtypeB0, UnknownTypes[ i ].subtypeB1, UnknownTypes[ i ].subtypeB2 );
-					out += ",\"subtype\":\"" + String( subtypeBuf ) + "\"";
+					STATS_APPEND( ",\"subtype\":\"%02X%02X%02X\"", UnknownTypes[ i ].subtypeB0, UnknownTypes[ i ].subtypeB1, UnknownTypes[ i ].subtypeB2 );
 				}
 				if ( UnknownTypes[ i ].mac[ 0 ] != '\0' )
 				{
-					out += ",\"mac\":\"" + JsonEscape( UnknownTypes[ i ].mac ) + "\"";
+					STATS_APPEND( ",\"mac\":\"%s\"", UnknownTypes[ i ].mac );
 				}
-				out += ",\"count\":" + String( UnknownTypes[ i ].count ) + "}";
-				if ( i + 1 < UnknownTypeCount )
-				{
-					out += ",";
-				}
+				STATS_APPEND( ",\"count\":%lu}", ( unsigned long )UnknownTypes[ i ].count );
 			}
-			out += "]";
-			out += "}";
-			request->send( 200, "application/json", out );
+			STATS_APPEND( "]}" );
+#undef STATS_APPEND
+
+			request->send( 200, "application/json", statsBuf );
 
 			digitalWrite( led, 0 );
 		} );
@@ -2492,7 +2589,7 @@ void setup()
 	pBLEScan->setInterval( 510 );
 	pBLEScan->setWindow( 200 );
 	pBLEScan->setActiveScan( true );
-	pBLEScan->setMaxResults( 0xFF );
+	pBLEScan->setMaxResults( 20 );
 	pBLEScan->start( 0, false, true );
 
 	Serial.println( "Application started" );
