@@ -180,7 +180,7 @@ class BLE_Device
 	bool AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 					uint8_t BLEDataSize, uint8_t* ManufactureData,
 					uint8_t ManufactureDataSize, bool* dataUpdated = nullptr,
-					bool* failedValidation = nullptr );
+					bool* failedValidation = nullptr, bool* unknownType = nullptr );
 	bool UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 					   uint8_t BLEDataSize, uint8_t* ManufactureData,
 					   uint8_t ManufactureDataSize );

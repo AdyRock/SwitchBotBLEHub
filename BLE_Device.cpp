@@ -93,7 +93,7 @@ void printHex( uint8_t* data, uint8_t len )
 	Serial.println( buf );
 }
 
-bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t* ManufactureData, uint16_t ManufactureDataSize )
+bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t* ManufactureData, uint16_t ManufactureDataSize, bool* unknownType = nullptr )
 {
 	if ( BLEData == nullptr || BLEDataSize == 0 )
 	{
@@ -185,8 +185,12 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 				{
 					// Serial.printf( "Unknown tribyte type %X, %X, %X\n", BLEData[4], BLEData[5], BLEData[6] );
 					// printHex( BLEData, BLEDataSize );
-					return false;
-				}
+				    if ( unknownType != nullptr )
+				    {
+					    *unknownType = true;
+				    }
+				    return false;
+			    }
 			}
 			break;
 
@@ -269,6 +273,10 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 				default:
 					// Serial.printf( "Unknown type %c\n", Type );
 					// printHex( BLEData, BLEDataSize );
+					if ( unknownType != nullptr )
+					{
+						*unknownType = true;
+					}
 					return false;
 			}
 
@@ -350,7 +358,7 @@ int BLE_Device::FindDevice( const char* MAC )
 bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 							uint8_t BLEDataSize, uint8_t* ManufactureData,
 							uint8_t ManufactureDataSize, bool* dataUpdated,
-							bool* failedValidation )
+							bool* failedValidation, bool* unknownType )
 {
 	if ( dataUpdated != nullptr )
 	{
@@ -360,8 +368,12 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 	{
 		*failedValidation = false;
 	}
+	if ( unknownType != nullptr )
+	{
+		*unknownType = false;
+	}
 
-	if ( !ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData, ManufactureDataSize ) )
+	if ( !ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData, ManufactureDataSize, unknownType ) )
 	{
 		// Wrong type or wrong data size
 		if ( failedValidation != nullptr )

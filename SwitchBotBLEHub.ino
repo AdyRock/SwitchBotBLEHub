@@ -31,7 +31,7 @@
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.10";
+const char* version = "Hello! SwitchBot BLE Hub V2.11";
 
 static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* key, String& value )
 {
@@ -295,7 +295,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
     <div class="wrap">
       <div class="card">
         <h1>SwitchBot BLE Hub</h1>
-        <p class="ver">Version 2.10</p>
+        <p class="ver">Version 2.11</p>
         <div class="links">
           <a class="btn" href="/update">Update firmware</a>
 					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
@@ -384,7 +384,8 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			var lastStats = null;
 			var statsClockOffsetMs = 0;
 			var nextStatsServerMs = 0;
-			var lastHeapHistory = null;
+			var lastChartHistory = null;
+			var chartConfig = null;
 			var statsRefreshTimer = null;
 			var statsFetchInFlight = false;
 
@@ -421,12 +422,12 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 
 			function render(s) {
 				var ble = "";
-				ble += mkStat("Adverts/min", s.advertsSeenPerMinute || 0, null, "Total BLE advertisements seen per minute.");
+				ble += mkStat("Adverts/min", s.advertsSeenPerMinute || 0, "openAdvertsHistory", "Total BLE advertisements seen per minute. Click to view recent history.");
 				ble += mkStat("UUID match/min", s.matchedServiceDataPerMinute || 0, null, "Advertisements per minute matching supported SwitchBot service UUIDs.");
 				ble += mkStat("Empty payload/min", s.matchedEmptyPayloadPerMinute || 0, null, "Matched advertisements per minute that had no service payload data.");
-				ble += mkStat("Rejected/min", s.matchedRejectedPerMinute || 0, null, "Matched advertisements per minute that failed validation and were ignored.");
-				ble += mkStat("Matches/min", s.updatesPerMinute || 0, null, "Matched advertisements per minute accepted by AddDevice (new, changed, or unchanged match).");
-				ble += mkStat("Actual updates/min", s.actualDataUpdatesPerMinute || 0, null, "New devices or existing devices whose stored data changed per minute.");
+				ble += mkStat("Bad data/min", s.badDataRejectedPerMinute || 0, null, "Matched advertisements per minute from known device types that failed data validation (wrong payload size).");
+				ble += mkStat("Matches/min", s.updatesPerMinute || 0, "openMatchesHistory", "Matched advertisements per minute accepted by AddDevice (new, changed, or unchanged match). Click to view recent history.");
+				ble += mkStat("Actual updates/min", s.actualDataUpdatesPerMinute || 0, "openActualUpdatesHistory", "New devices or existing devices whose stored data changed per minute. Click to view recent history.");
 				ble += mkStat("No-update minutes", s.noUpdateMinutes || 0, null, "Consecutive minutes with zero accepted device updates.");
 				document.getElementById("bleStats").innerHTML = ble;
 
@@ -479,11 +480,29 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			}
 
 			function openFreeHeapHistory() {
-				document.getElementById("heapHistoryModal").style.display = "flex";
-				loadFreeHeapHistory();
+				openHistoryChart("Free Heap History", "/api/v1/stats/free-heap-history", "#4ec94e", "bytes");
 			}
 
-			function drawFreeHeapHistory(values, intervalMs) {
+			function openAdvertsHistory() {
+				openHistoryChart("Adverts/min History", "/api/v1/stats/adverts-history", "#4ec9ff", "per min");
+			}
+
+			function openMatchesHistory() {
+				openHistoryChart("Matches/min History", "/api/v1/stats/matches-history", "#d7ba7d", "per min");
+			}
+
+			function openActualUpdatesHistory() {
+				openHistoryChart("Actual updates/min History", "/api/v1/stats/actual-updates-history", "#ce9178", "per min");
+			}
+
+			function openHistoryChart(title, url, lineColor, units) {
+				chartConfig = { title: title, url: url, lineColor: lineColor, units: units || "" };
+				document.getElementById("heapHistoryTitle").textContent = title;
+				document.getElementById("heapHistoryModal").style.display = "flex";
+				loadHistoryChart();
+			}
+
+			function drawHistoryChart(values, intervalMs) {
 				var canvas = document.getElementById("heapHistoryCanvas");
 				var meta = document.getElementById("heapHistoryMeta");
 				var ratio = window.devicePixelRatio || 1;
@@ -527,7 +546,7 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 					ctx.stroke();
 				}
 
-				ctx.strokeStyle = "#4ec94e";
+				ctx.strokeStyle = (chartConfig && chartConfig.lineColor) ? chartConfig.lineColor : "#4ec94e";
 				ctx.lineWidth = 2;
 				ctx.beginPath();
 				for (var j = 0; j < values.length; j++) {
@@ -546,27 +565,32 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				var spanMs = intervalMs * (values.length - 1);
 				var spanHours = (spanMs / 3600000).toFixed(1);
 				var latest = values[values.length - 1];
-				meta.textContent = "Samples: " + values.length + " | Window: ~" + spanHours + "h | Min: " + minV + " | Max: " + maxV + " | Latest: " + latest;
+				var units = (chartConfig && chartConfig.units) ? (" " + chartConfig.units) : "";
+				meta.textContent = "Samples: " + values.length + " | Window: ~" + spanHours + "h | Min: " + minV + units + " | Max: " + maxV + units + " | Latest: " + latest + units;
 			}
 
-			function loadFreeHeapHistory() {
+			function loadHistoryChart() {
 				var meta = document.getElementById("heapHistoryMeta");
 				meta.textContent = "Loading...";
-				fetch("/api/v1/stats/free-heap-history", { headers: { Accept: "application/json" } })
+				if (!chartConfig || !chartConfig.url) {
+					meta.textContent = "No chart configured";
+					return;
+				}
+				fetch(chartConfig.url, { headers: { Accept: "application/json" } })
 					.then(function(r) { return r.json(); })
 					.then(function(data) {
-						lastHeapHistory = data;
-						drawFreeHeapHistory(data.values || [], data.intervalMs || 15000);
+						lastChartHistory = data;
+						drawHistoryChart(data.values || [], data.intervalMs || 15000);
 					})
 					.catch(function(e) {
 						meta.textContent = "Failed to load history: " + e;
-						drawFreeHeapHistory([], 15000);
+						drawHistoryChart([], 15000);
 					});
 			}
 
 			window.addEventListener("resize", function() {
-				if (document.getElementById("heapHistoryModal").style.display === "flex" && lastHeapHistory) {
-					drawFreeHeapHistory(lastHeapHistory.values || [], lastHeapHistory.intervalMs || 15000);
+				if (document.getElementById("heapHistoryModal").style.display === "flex" && lastChartHistory) {
+					drawHistoryChart(lastChartHistory.values || [], lastChartHistory.intervalMs || 15000);
 				}
 			});
 
@@ -989,17 +1013,20 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 		<title>Homey Monitor</title>
 		<style>
 			body { margin: 0; background: #1e1e1e; color: #d4d4d4; font-family: sans-serif; }
-			.wrap { max-width: 1100px; margin: 1.2rem auto; padding: 0 1rem; }
+			.wrap { width: 100%; max-width: 100vw; box-sizing: border-box; margin: 1.2rem auto; padding: 0 1rem; }
 			.top { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.9rem; }
 			.title { color: #9cdcfe; font-size: 1.45rem; font-weight: 700; }
 			.home { text-decoration: none; background: #3c3c3c; color: #fff; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; }
 			.home:hover { background: #555; }
 			.grid { display: grid; grid-template-columns: 1fr; gap: .9rem; }
-			.card { background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: .85rem; }
+			.card { background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: .85rem; min-width: 0; }
 			.card h2 { margin: 0 0 .7rem; color: #9cdcfe; font-size: 1.05rem; }
-			table { width: 100%; border-collapse: collapse; font-size: .86rem; }
-			th, td { border-bottom: 1px solid #3c3c3c; padding: .45rem .5rem; text-align: left; vertical-align: top; }
+			.table-wrap { overflow-x: auto; width: 100%; }
+			table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: .86rem; }
+			th, td { border-bottom: 1px solid #3c3c3c; padding: .45rem .5rem; text-align: left; vertical-align: top; overflow: hidden; }
 			th { color: #9cdcfe; font-weight: 600; }
+			td.wrap-cell { white-space: pre-wrap; word-break: break-all; }
+			td.nowrap-cell { white-space: nowrap; }
 			.empty { color: #9aa0a6; font-size: .86rem; }
 			.meta { color: #9aa0a6; font-size: .82rem; margin-top: .35rem; }
 			code { color: #d7ba7d; }
@@ -1029,10 +1056,15 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 		</div>
 		<script>
 			var monitorClockOffsetMs = 0;
-			var nextMonitorServerMs = 0;
 			var monitorRefreshTimer = null;
 			var monitorFetchInFlight = false;
 			var monitorLastUpdatedText = "-";
+			var lastBleCommandSeq = -1;
+			var bleSeqTimer = null;
+			var lastPushUpdateSeq = -1;
+			var pushSeqTimer = null;
+			var pushData = [];
+			var cmdData = [];
 
 			function esc(s) {
 				return String(s || "")
@@ -1046,20 +1078,20 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 			function fmtAge(ms) {
 				var n = Number(ms || 0);
 				if (!n) return "-";
-				return n + " ms";
-			}
-
-			function getMonitorRemainingSeconds() {
-				if (nextMonitorServerMs <= 0) return "--";
 				var serverNowMs = Date.now() - monitorClockOffsetMs;
-				var rem = Math.ceil((nextMonitorServerMs - serverNowMs) / 1000);
-				if (rem < 0) rem = 0;
-				return rem;
+				var ageMs = serverNowMs - n;
+				if (ageMs < 0) ageMs = 0;
+				var s = Math.floor(ageMs / 1000);
+				if (s < 60) return s + "s ago";
+				var m = Math.floor(s / 60); s = s % 60;
+				if (m < 60) return m + "m " + s + "s ago";
+				var h = Math.floor(m / 60); m = m % 60;
+				return h + "h " + m + "m ago";
 			}
 
 			function updateMonitorMeta(statusPrefix) {
 				var prefix = statusPrefix || "Updated: " + monitorLastUpdatedText;
-				document.getElementById('meta').textContent = prefix + " | Next update: " + getMonitorRemainingSeconds() + "s";
+				document.getElementById('meta').textContent = prefix;
 			}
 
 			function renderRegistered(list) {
@@ -1068,12 +1100,12 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 					host.innerHTML = '<div class="empty">No Homey callbacks currently registered.</div>';
 					return;
 				}
-				var h = '<table><thead><tr><th>IP</th><th>Callback URI</th></tr></thead><tbody>';
+				var h = '<div class="table-wrap"><table><thead><tr><th>IP</th><th>Callback URI</th></tr></thead><tbody>';
 				for (var i = 0; i < list.length; i++) {
 					var r = list[i] || {};
 					h += '<tr><td>' + esc(r.ip || '-') + '</td><td><code>' + esc(r.uri || '') + '</code></td></tr>';
 				}
-				h += '</tbody></table>';
+				h += '</tbody></table></div>';
 				host.innerHTML = h;
 			}
 
@@ -1083,12 +1115,14 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 					host.innerHTML = '<div class="empty">No push updates sent yet.</div>';
 					return;
 				}
-				var h = '<table><thead><tr><th>At</th><th>IP</th><th>Payload</th><th>Bytes</th><th>HTTP</th></tr></thead><tbody>';
+				var h = '<div class="table-wrap"><table style="table-layout:fixed"><colgroup>'
+					+ '<col style="width:7em"><col style="width:9em"><col><col style="width:5em"><col style="width:5em">'
+					+ '</colgroup><thead><tr><th>At</th><th>IP</th><th>Payload</th><th>Bytes</th><th>HTTP</th></tr></thead><tbody>';
 				for (var i = 0; i < list.length; i++) {
 					var e = list[i] || {};
-					h += '<tr><td>' + fmtAge(e.atMs) + '</td><td>' + esc(e.ip || '-') + '</td><td><code>' + esc(e.payload || '') + '</code></td><td>' + Number(e.bytes || 0) + '</td><td>' + Number(e.httpCode || 0) + '</td></tr>';
+					h += '<tr><td class="nowrap-cell">' + fmtAge(e.atMs) + '</td><td class="nowrap-cell">' + esc(e.ip || '-') + '</td><td class="wrap-cell"><code>' + esc(e.payload || '') + '</code></td><td>' + Number(e.bytes || 0) + '</td><td>' + Number(e.httpCode || 0) + '</td></tr>';
 				}
-				h += '</tbody></table>';
+				h += '</tbody></table></div>';
 				host.innerHTML = h;
 			}
 
@@ -1098,12 +1132,14 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 					host.innerHTML = '<div class="empty">No BLE commands received yet.</div>';
 					return;
 				}
-				var h = '<table><thead><tr><th>At</th><th>Source IP</th><th>Address</th><th>Data</th><th>Result</th></tr></thead><tbody>';
+				var h = '<div class="table-wrap"><table style="table-layout:fixed"><colgroup>'
+					+ '<col style="width:7em"><col style="width:9em"><col style="width:12em"><col><col style="width:8em">'
+					+ '</colgroup><thead><tr><th>At</th><th>Source IP</th><th>Address</th><th>Data</th><th>Result</th></tr></thead><tbody>';
 				for (var i = 0; i < list.length; i++) {
 					var e = list[i] || {};
-					h += '<tr><td>' + fmtAge(e.atMs) + '</td><td>' + esc(e.sourceIp || '-') + '</td><td><code>' + esc(e.address || '') + '</code></td><td><code>' + esc(e.data || '') + '</code></td><td>' + esc(e.result || '') + '</td></tr>';
+					h += '<tr><td class="nowrap-cell">' + fmtAge(e.atMs) + '</td><td class="nowrap-cell">' + esc(e.sourceIp || '-') + '</td><td class="nowrap-cell"><code>' + esc(e.address || '') + '</code></td><td class="wrap-cell"><code>' + esc(e.data || '') + '</code></td><td class="nowrap-cell">' + esc(e.result || '') + '</td></tr>';
 				}
-				h += '</tbody></table>';
+				h += '</tbody></table></div>';
 				host.innerHTML = h;
 			}
 
@@ -1113,19 +1149,18 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 				fetch('/api/v1/homey/monitor', { headers: { Accept: 'application/json' } })
 					.then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
 					.then(function(d) {
+						pushData = d.pushUpdates || [];
+						cmdData = d.bleCommands || [];
 						renderRegistered(d.registered || []);
-						renderPush(d.pushUpdates || []);
-						renderCmd(d.bleCommands || []);
+						renderPush(pushData);
+						renderCmd(cmdData);
+
+						if (d.bleCommandSeq !== undefined) lastBleCommandSeq = Number(d.bleCommandSeq);
+						if (d.pushUpdateSeq !== undefined) lastPushUpdateSeq = Number(d.pushUpdateSeq);
 
 						monitorClockOffsetMs = Date.now() - Number(d.uptimeMs || 0);
-						nextMonitorServerMs = Number(d.nextUpdateAtMs || 0);
 						monitorLastUpdatedText = new Date().toLocaleTimeString();
 						updateMonitorMeta();
-
-						var serverNowMs = Date.now() - monitorClockOffsetMs;
-						var msUntilNext = Math.max(250, nextMonitorServerMs - serverNowMs + 50);
-						if (monitorRefreshTimer) clearTimeout(monitorRefreshTimer);
-						monitorRefreshTimer = setTimeout(load, msUntilNext);
 					})
 					.catch(function(e) {
 						document.getElementById('registered').innerHTML = '<div class="empty">Error loading data: ' + esc(e) + '</div>';
@@ -1138,9 +1173,45 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 					});
 			}
 
+			function pollBleSeq() {
+				fetch('/api/v1/homey/bleseq')
+					.then(function(r) { return r.json(); })
+					.then(function(d) {
+						var seq = Number(d.seq);
+						if (lastBleCommandSeq >= 0 && seq !== lastBleCommandSeq) {
+							if (monitorRefreshTimer) clearTimeout(monitorRefreshTimer);
+							load();
+						}
+					})
+					.catch(function() {})
+					.finally(function() {
+						bleSeqTimer = setTimeout(pollBleSeq, 500);
+					});
+			}
+
+			function pollPushSeq() {
+				fetch('/api/v1/homey/pushseq')
+					.then(function(r) { return r.json(); })
+					.then(function(d) {
+						var seq = Number(d.seq);
+						if (lastPushUpdateSeq >= 0 && seq !== lastPushUpdateSeq) {
+							if (monitorRefreshTimer) clearTimeout(monitorRefreshTimer);
+							load();
+						}
+					})
+					.catch(function() {})
+					.finally(function() {
+						pushSeqTimer = setTimeout(pollPushSeq, 5000);
+					});
+			}
+
 			load();
+			pollBleSeq();
+			pollPushSeq();
 			setInterval(function() {
 				updateMonitorMeta();
+				if (pushData.length) renderPush(pushData);
+				if (cmdData.length) renderCmd(cmdData);
 			}, 1000);
 		</script>
 	</body>
@@ -1190,6 +1261,9 @@ DNSServer dns;
 AsyncUDP udp;
 AsyncEventSource bleEvents( "/api/v1/events" );
 
+const IPAddress DISCOVERY_MULTICAST_IP( 239, 1, 2, 3 );
+const uint16_t DISCOVERY_PORT = 1234;
+
 ESPAsyncHTTPUpdateServer _updateServer;
 
 unsigned long ota_progress_millis = 0;
@@ -1208,6 +1282,7 @@ int32_t NumAdvertsSeen = 0;
 int32_t NumMatchedServiceData = 0;
 int32_t NumMatchedEmptyPayload = 0;
 int32_t NumMatchedRejected = 0;
+int32_t NumBadDataRejected = 0;
 int32_t NumUpdatesAt0 = 0;
 int32_t NumZeroUpdateIntervals = 0;
 volatile int32_t LastUpdatesPerMinute = 0;
@@ -1216,6 +1291,7 @@ volatile int32_t LastAdvertsSeenPerMinute = 0;
 volatile int32_t LastMatchedServiceDataPerMinute = 0;
 volatile int32_t LastMatchedEmptyPayloadPerMinute = 0;
 volatile int32_t LastMatchedRejectedPerMinute = 0;
+volatile int32_t LastBadDataRejectedPerMinute = 0;
 volatile uint32_t LastFreeHeap = 0;
 volatile uint32_t LastLargestHeapBlock = 0;
 volatile uint32_t LastStatsAt = 0;
@@ -1254,14 +1330,21 @@ struct BLE_COMMAND_LOG_ENTRY
 PUSH_UPDATE_LOG_ENTRY PushUpdateHistory[ HOMEY_HISTORY_MAX ];
 uint8_t PushUpdateHistoryStart = 0;
 uint8_t PushUpdateHistoryCount = 0;
+uint32_t PushUpdateSeq = 0;
 
 BLE_COMMAND_LOG_ENTRY BleCommandHistory[ HOMEY_HISTORY_MAX ];
 uint8_t BleCommandHistoryStart = 0;
 uint8_t BleCommandHistoryCount = 0;
+uint32_t BleCommandSeq = 0;
 
 uint32_t FreeHeapHistory[ FREE_HEAP_HISTORY_MAX ];
 uint16_t FreeHeapHistoryStart = 0;
 uint16_t FreeHeapHistoryCount = 0;
+int32_t AdvertsPerMinuteHistory[ FREE_HEAP_HISTORY_MAX ];
+int32_t MatchesPerMinuteHistory[ FREE_HEAP_HISTORY_MAX ];
+int32_t ActualUpdatesPerMinuteHistory[ FREE_HEAP_HISTORY_MAX ];
+uint16_t BleRateHistoryStart = 0;
+uint16_t BleRateHistoryCount = 0;
 struct UNKNOWN_TYPE_ENTRY
 {
 	uint8_t type;
@@ -1373,6 +1456,7 @@ static void RecordPushUpdate( const char* target, const char* payload, int bytes
 	}
 	strncpy( PushUpdateHistory[ idx ].ip, ip, sizeof( PushUpdateHistory[ idx ].ip ) - 1 );
 	PushUpdateHistory[ idx ].ip[ sizeof( PushUpdateHistory[ idx ].ip ) - 1 ] = 0;
+	PushUpdateSeq++;
 	unlockHistory();
 }
 
@@ -1400,7 +1484,76 @@ static void RecordBleCommandRequest( const char* sourceIp, const char* address, 
 	BleCommandHistory[ idx ].data[ sizeof( BleCommandHistory[ idx ].data ) - 1 ] = 0;
 	strncpy( BleCommandHistory[ idx ].result, ( result != nullptr ? result : "" ), sizeof( BleCommandHistory[ idx ].result ) - 1 );
 	BleCommandHistory[ idx ].result[ sizeof( BleCommandHistory[ idx ].result ) - 1 ] = 0;
+	BleCommandSeq++;
 	unlockHistory();
+}
+
+static void FormatBleCommandData( const BLE_COMMAND* command, char* out, size_t outSize )
+{
+	if ( out == nullptr || outSize == 0 )
+	{
+		return;
+	}
+
+	out[ 0 ] = 0;
+	if ( command == nullptr || command->DataLen <= 0 )
+	{
+		return;
+	}
+
+	int bytes = snprintf( out, outSize, "[" );
+	for ( int i = 0; i < command->DataLen && bytes > 0 && bytes < ( int )outSize - 2; i++ )
+	{
+		bytes += snprintf( out + bytes, outSize - bytes, "%u", command->Data[ i ] );
+		if ( i + 1 < command->DataLen )
+		{
+			bytes += snprintf( out + bytes, outSize - bytes, "," );
+		}
+	}
+
+	if ( bytes > 0 && bytes < ( int )outSize - 1 )
+	{
+		snprintf( out + bytes, outSize - bytes, "]" );
+	}
+	else
+	{
+		out[ outSize - 1 ] = 0;
+	}
+}
+
+static void UpdateBleCommandResult( const char* sourceIp, const char* address, const char* data, const char* result )
+{
+	bool updated = false;
+	lockHistory();
+	for ( int i = BleCommandHistoryCount - 1; i >= 0; i-- )
+	{
+		uint8_t idx = ( BleCommandHistoryStart + i ) % HOMEY_HISTORY_MAX;
+		if ( strcmp( BleCommandHistory[ idx ].sourceIp, ( sourceIp != nullptr ? sourceIp : "" ) ) != 0 )
+		{
+			continue;
+		}
+		if ( strcmp( BleCommandHistory[ idx ].address, ( address != nullptr ? address : "" ) ) != 0 )
+		{
+			continue;
+		}
+		if ( strcmp( BleCommandHistory[ idx ].data, ( data != nullptr ? data : "" ) ) != 0 )
+		{
+			continue;
+		}
+
+		BleCommandHistory[ idx ].atMs = millis();
+		strncpy( BleCommandHistory[ idx ].result, ( result != nullptr ? result : "" ), sizeof( BleCommandHistory[ idx ].result ) - 1 );
+		BleCommandHistory[ idx ].result[ sizeof( BleCommandHistory[ idx ].result ) - 1 ] = 0;
+		BleCommandSeq++;
+		updated = true;
+		break;
+	}
+	unlockHistory();
+
+	if ( !updated )
+	{
+		RecordBleCommandRequest( sourceIp, address, data, result );
+	}
 }
 
 static void RecordUnknownType( uint8_t type )
@@ -1467,6 +1620,25 @@ static void RecordFreeHeapHistory( uint32_t freeHeap )
 	}
 }
 
+static void RecordBleRateHistory( int32_t advertsPerMinute, int32_t matchesPerMinute, int32_t actualUpdatesPerMinute )
+{
+	if ( BleRateHistoryCount < FREE_HEAP_HISTORY_MAX )
+	{
+		const uint16_t idx = ( BleRateHistoryStart + BleRateHistoryCount ) % FREE_HEAP_HISTORY_MAX;
+		AdvertsPerMinuteHistory[ idx ] = advertsPerMinute;
+		MatchesPerMinuteHistory[ idx ] = matchesPerMinute;
+		ActualUpdatesPerMinuteHistory[ idx ] = actualUpdatesPerMinute;
+		BleRateHistoryCount++;
+	}
+	else
+	{
+		AdvertsPerMinuteHistory[ BleRateHistoryStart ] = advertsPerMinute;
+		MatchesPerMinuteHistory[ BleRateHistoryStart ] = matchesPerMinute;
+		ActualUpdatesPerMinuteHistory[ BleRateHistoryStart ] = actualUpdatesPerMinute;
+		BleRateHistoryStart = ( BleRateHistoryStart + 1 ) % FREE_HEAP_HISTORY_MAX;
+	}
+}
+
 // The remote service we wish to connect to.
 static BLEUUID serviceUUID( "cba20d00-224d-11e6-9fb8-0002a5d5c51b" );
 // The characteristic of the remote service we are interested in.
@@ -1477,6 +1649,67 @@ static BLEUUID notifyUUID( "cba20003-224d-11e6-9fb8-0002a5d5c51b" );
 int SendDeviceChange( const char* host, const char* data, int bytes );
 void SendChangedDevices();
 void WriteToBLEDevice( BLE_COMMAND* BLECommand );
+
+static void SendDiscoveryAnnouncement( const IPAddress* targetIp = nullptr, uint16_t targetPort = 0 )
+{
+	char message[ 64 ];
+	int length = snprintf( message, sizeof( message ), "SwitchBot BLE Hub! %s", macAddress );
+	if ( length <= 0 )
+	{
+		return;
+	}
+
+	if ( targetIp != nullptr && targetPort != 0 )
+	{
+		size_t sent = udp.writeTo( ( const uint8_t* )message, ( size_t )length, *targetIp, targetPort );
+		Serial.printf( "UDP unicast discovery reply to %s:%u (%u bytes)\n", targetIp->toString().c_str(), targetPort, ( unsigned int )sent );
+	}
+
+	size_t multicastSent = udp.writeTo( ( const uint8_t* )message, ( size_t )length, DISCOVERY_MULTICAST_IP, DISCOVERY_PORT );
+	Serial.printf( "UDP multicast discovery announcement to %s:%u (%u bytes)\n", DISCOVERY_MULTICAST_IP.toString().c_str(), DISCOVERY_PORT, ( unsigned int )multicastSent );
+}
+
+static void HandleDiscoveryPacket( AsyncUDPPacket& packet, const char* listenerName )
+{
+	String packetText;
+	packetText.reserve( packet.length() + 1 );
+	for ( size_t i = 0; i < packet.length(); i++ )
+	{
+		char c = ( char )packet.data()[ i ];
+		if ( c == '\0' )
+		{
+			break;
+		}
+		packetText += c;
+	}
+	packetText.trim();
+
+	String packetLower = packetText;
+	packetLower.toLowerCase();
+	if ( ( packetText == "Are you there SwitchBot?" ) ||
+		 ( packetText == "Are you there SwitchBot" ) ||
+		 ( packetLower.indexOf( "are you there switchbot" ) >= 0 ) )
+	{
+		Serial.printf( "Received discovery on %s: '%s' from %s:%u\n",
+			listenerName,
+			packetText.c_str(),
+			packet.remoteIP().toString().c_str(),
+			packet.remotePort() );
+		IPAddress remoteIp = packet.remoteIP();
+		uint16_t remotePort = packet.remotePort();
+		SendDiscoveryAnnouncement( &remoteIp, remotePort );
+		sendBroadcast = millis();
+	}
+	else
+	{
+		Serial.printf( "Received other UDP packet on %s from %s:%u len=%u text='%s'\n",
+			listenerName,
+			packet.remoteIP().toString().c_str(),
+			packet.remotePort(),
+			( unsigned int )packet.length(),
+			packetText.c_str() );
+	}
+}
 
 void handleRoot( AsyncWebServerRequest* request )
 {
@@ -1553,7 +1786,8 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			NumMatchedServiceData++;
 			bool dataUpdated = false;
 			bool failedValidation = false;
-			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length(), &dataUpdated, &failedValidation ) )
+			bool unknownType = false;
+			if ( BLE_Devices.AddDevice( advertisedDevice->getAddress().toString().c_str(), advertisedDevice->getRSSI(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length(), &dataUpdated, &failedValidation, &unknownType ) )
 			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 				NumUpdates++;
@@ -1565,11 +1799,15 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			}
 			else
 			{
-				if ( failedValidation )
+				if ( failedValidation && unknownType )
 				{
 					RecordUnknownType( serviceDataBuf[ 0 ] );
+					NumMatchedRejected++;
 				}
-				NumMatchedRejected++;
+				else if ( failedValidation )
+				{
+					NumBadDataRejected++;
+				}
 			}
 			// else
 			// {
@@ -1900,6 +2138,81 @@ void setup()
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/stats/adverts-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		String out;
+		out.reserve( 14000 );
+		out = "{";
+		out += "\"intervalMs\":" + String( STATS_SAMPLE_MS );
+		out += ",\"maxPoints\":" + String( FREE_HEAP_HISTORY_MAX );
+		out += ",\"count\":" + String( BleRateHistoryCount );
+		out += ",\"values\":[";
+		for ( uint16_t i = 0; i < BleRateHistoryCount; i++ )
+		{
+			const uint16_t idx = ( BleRateHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
+			out += String( AdvertsPerMinuteHistory[ idx ] );
+			if ( i + 1 < BleRateHistoryCount )
+			{
+				out += ",";
+			}
+		}
+		out += "]}";
+
+		request->send( 200, "application/json", out );
+		digitalWrite( led, 0 );
+	} );
+
+	server.on( "/api/v1/stats/matches-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		String out;
+		out.reserve( 14000 );
+		out = "{";
+		out += "\"intervalMs\":" + String( STATS_SAMPLE_MS );
+		out += ",\"maxPoints\":" + String( FREE_HEAP_HISTORY_MAX );
+		out += ",\"count\":" + String( BleRateHistoryCount );
+		out += ",\"values\":[";
+		for ( uint16_t i = 0; i < BleRateHistoryCount; i++ )
+		{
+			const uint16_t idx = ( BleRateHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
+			out += String( MatchesPerMinuteHistory[ idx ] );
+			if ( i + 1 < BleRateHistoryCount )
+			{
+				out += ",";
+			}
+		}
+		out += "]}";
+
+		request->send( 200, "application/json", out );
+		digitalWrite( led, 0 );
+	} );
+
+	server.on( "/api/v1/stats/actual-updates-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		String out;
+		out.reserve( 14000 );
+		out = "{";
+		out += "\"intervalMs\":" + String( STATS_SAMPLE_MS );
+		out += ",\"maxPoints\":" + String( FREE_HEAP_HISTORY_MAX );
+		out += ",\"count\":" + String( BleRateHistoryCount );
+		out += ",\"values\":[";
+		for ( uint16_t i = 0; i < BleRateHistoryCount; i++ )
+		{
+			const uint16_t idx = ( BleRateHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
+			out += String( ActualUpdatesPerMinuteHistory[ idx ] );
+			if ( i + 1 < BleRateHistoryCount )
+			{
+				out += ",";
+			}
+		}
+		out += "]}";
+
+		request->send( 200, "application/json", out );
+		digitalWrite( led, 0 );
+	} );
+
 	server.on( "/api/v1/homey/monitor", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 
@@ -1964,11 +2277,21 @@ void setup()
 		uint32_t nowMs = millis();
 		out += "\"uptimeMs\":" + String( nowMs );
 		out += ",\"nextUpdateAtMs\":" + String( LastStatsAt + STATS_SAMPLE_MS );
+		out += ",\"bleCommandSeq\":" + String( BleCommandSeq );
+		out += ",\"pushUpdateSeq\":" + String( PushUpdateSeq );
 
 		out += "}";
 
 		request->send( 200, "application/json", out );
 		digitalWrite( led, 0 );
+	} );
+
+	server.on( "/api/v1/homey/pushseq", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		request->send( 200, "application/json", "{\"seq\":" + String( PushUpdateSeq ) + "}" );
+	} );
+
+	server.on( "/api/v1/homey/bleseq", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		request->send( 200, "application/json", "{\"seq\":" + String( BleCommandSeq ) + "}" );
 	} );
 
 		server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
@@ -1980,6 +2303,7 @@ void setup()
 			out += ",\"matchedServiceDataPerMinute\":" + String( LastMatchedServiceDataPerMinute );
 			out += ",\"matchedEmptyPayloadPerMinute\":" + String( LastMatchedEmptyPayloadPerMinute );
 			out += ",\"matchedRejectedPerMinute\":" + String( LastMatchedRejectedPerMinute );
+			out += ",\"badDataRejectedPerMinute\":" + String( LastBadDataRejectedPerMinute );
 			out += ",\"updatesPerMinute\":" + String( LastUpdatesPerMinute );
 			out += ",\"actualDataUpdatesPerMinute\":" + String( LastActualDataUpdatesPerMinute );
 			out += ",\"currentMinuteUpdates\":" + String( NumUpdates );
@@ -2060,6 +2384,7 @@ void setup()
 	LastLargestHeapBlock = heap_caps_get_largest_free_block( MALLOC_CAP_8BIT );
 	LastStatsAt = millis();
 	RecordFreeHeapHistory( LastFreeHeap );
+	RecordBleRateHistory( LastAdvertsSeenPerMinute, LastUpdatesPerMinute, LastActualDataUpdatesPerMinute );
 	SampleCpuUsage();
 
 	if ( udp.listenMulticast( IPAddress( 239, 1, 2, 3 ), 1234 ) )
@@ -2067,18 +2392,12 @@ void setup()
 		Serial.print( "UDP Listening on IP: " );
 		Serial.println( WiFi.localIP() );
 		udp.onPacket( []( AsyncUDPPacket packet ) {
-			// Serial.println();
-			// Serial.print( "UDP Packet: " );
-			// Serial.printf( ", Data (len %i): ", packet.length() );
-			// Serial.write( packet.data(), packet.length() );
-			// Serial.println();
-			// Serial.println();
-			if ( strncmp( ( char* )packet.data(), "Are you there SwitchBot?", packet.length() ) == 0 )
-			{
-				Serial.println( "Received: Are you there SwitchBot?" );
-				sendBroadcast = millis();
-			}
-		} );
+			Serial.println( "Received multicast packet" );
+			HandleDiscoveryPacket( packet, "multicast" ); } );
+	}
+	else
+	{
+		Serial.printf( "Failed to join multicast 39.1.2.3:1234\n" );
 	}
 
 } // End of setup.
@@ -2123,8 +2442,8 @@ void loop()
 		{
 			// Send multicast
 			// Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
-			udp.printf( "SwitchBot BLE Hub! %s", macAddress );
-			sendBroadcast = millis() + 60000;
+			SendDiscoveryAnnouncement();
+			sendBroadcast = millis() + 15000;
 		}
 
 		if ( millis() >= nextStatsSample )
@@ -2135,6 +2454,7 @@ void loop()
 			LastMatchedServiceDataPerMinute = NumMatchedServiceData * ( int32_t )STATS_PER_MINUTE_SCALE;
 			LastMatchedEmptyPayloadPerMinute = NumMatchedEmptyPayload * ( int32_t )STATS_PER_MINUTE_SCALE;
 			LastMatchedRejectedPerMinute = NumMatchedRejected * ( int32_t )STATS_PER_MINUTE_SCALE;
+			LastBadDataRejectedPerMinute = NumBadDataRejected * ( int32_t )STATS_PER_MINUTE_SCALE;
 			LastUpdatesPerMinute = NumUpdates * ( int32_t )STATS_PER_MINUTE_SCALE;
 			LastActualDataUpdatesPerMinute = NumActualDataUpdates * ( int32_t )STATS_PER_MINUTE_SCALE;
 
@@ -2155,11 +2475,12 @@ void loop()
 				RebootRequired = true;
 			}
 
-			Serial.printf( "BLE adverts %i/min, UUID matches %i/min, empty payload %i/min, rejected %i/min, updates %i/min\n", LastAdvertsSeenPerMinute, LastMatchedServiceDataPerMinute, LastMatchedEmptyPayloadPerMinute, LastMatchedRejectedPerMinute, LastUpdatesPerMinute );
+			Serial.printf( "BLE adverts %i/min, UUID matches %i/min, empty payload %i/min, rejected %i/min, bad data %i/min, updates %i/min\n", LastAdvertsSeenPerMinute, LastMatchedServiceDataPerMinute, LastMatchedEmptyPayloadPerMinute, LastMatchedRejectedPerMinute, LastBadDataRejectedPerMinute, LastUpdatesPerMinute );
 			NumAdvertsSeen = 0;
 			NumMatchedServiceData = 0;
 			NumMatchedEmptyPayload = 0;
 			NumMatchedRejected = 0;
+			NumBadDataRejected = 0;
 			NumUpdates = 0;
 			NumActualDataUpdates = 0;
 
@@ -2171,6 +2492,7 @@ void loop()
 			LastStatsAt = millis();
 			pendingSSEStats = true;
 			RecordFreeHeapHistory( freeHeap );
+			RecordBleRateHistory( LastAdvertsSeenPerMinute, LastUpdatesPerMinute, LastActualDataUpdatesPerMinute );
 			SampleCpuUsage();
 			Serial.printf( "\nFree Heap %i, Largest block %i, CPU %i%%\n\n", freeHeap, largestHeapBlock, LastCpuUsagePercent );
 			if ( largestHeapBlock < 30000 )
@@ -2288,6 +2610,9 @@ void SendChangedDevices()
 void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 {
 	BLEScan* pBLEScan = BLEDevice::getScan();
+	char commandDataText[ 80 ];
+	FormatBleCommandData( BLECommand, commandDataText, sizeof( commandDataText ) );
+	const char* finalResult = "error-device-not-found";
 
 	const BLEAddress bleAddress( BLECommand->Address, 0 );
 	Serial.printf( "Sending command to BLE device: %s\n", BLECommand->Address );
@@ -2337,6 +2662,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 					if ( rc != nullptr )
 					{
 						Serial.println( "Got remote characteristic" );
+						finalResult = "completed";
 
 						BLERemoteCharacteristic* rn = nullptr;
 						if ( ( ( BLECommand->Data[ 0 ] == 87 ) && ( BLECommand->Data[ 1 ] == 15 ) && ( BLECommand->Data[ 2 ] == 72 ) && ( BLECommand->Data[ 3 ] == 1 ) ) ||
@@ -2351,6 +2677,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 								if ( !rn->subscribe( true, notifyCallback ) )
 								{
 									Serial.println( "Registering notification FAILED!" );
+									finalResult = "error-notify-subscribe";
 								}
 							}
 						}
@@ -2366,6 +2693,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 							if ( BLENotifyLength > 0 )
 							{
 								Serial.println( "Got notification" );
+								finalResult = "completed-notify";
 
 								char replyBuf[ 300 ];
 								int idx = BLE_Devices.FindDevice( BLECommand->Address );
@@ -2418,6 +2746,10 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 									Serial.printf( "Callback URL %s not found (2)\n", BLECommand->ReplyTo );
 								}
 							}
+							else
+							{
+								finalResult = "error-notify-timeout";
+							}
 
 							Serial.println( "Unsubscribe from notification" );
 							rn->unsubscribe();
@@ -2427,11 +2759,13 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 					else
 					{
 						Serial.println( "Failed to get characteristic" );
+						finalResult = "error-characteristic";
 					}
 				}
 				else
 				{
 					Serial.println( "Failed to get service" );
+					finalResult = "error-service";
 				}
 
 				pBLEClient->disconnect();
@@ -2440,6 +2774,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 			else
 			{
 				Serial.println( "Failed to connected to device" );
+				finalResult = "error-connect";
 			}
 		}
 
@@ -2449,6 +2784,8 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 	{
 		Serial.println( "Device not found (3)" );
 	}
+
+	UpdateBleCommandResult( BLECommand->ReplyTo, BLECommand->Address, commandDataText, finalResult );
 
 	Serial.println( "Restarting BLE scan" );
 	pBLEScan->start( 0, true, false );
