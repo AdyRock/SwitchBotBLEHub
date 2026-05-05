@@ -365,7 +365,7 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 					<div class="stats" id="memStats"></div>
 				</section>
 				<section class="block">
-					<h2>Unknown Device Types</h2>
+					<h2 id="unknownDevicesTitle">Unknown Devices</h2>
 					<div class="unknown-wrap" id="unknownTypes"></div>
 				</section>
 			</div>
@@ -388,6 +388,8 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			var chartConfig = null;
 			var statsRefreshTimer = null;
 			var statsFetchInFlight = false;
+			var statsErrorText = "";
+			var statsErrorUntilMs = 0;
 
 			function escAttr(s) {
 				return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
@@ -420,6 +422,14 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				return rem;
 			}
 
+			function updateStatsMeta() {
+				if (statsErrorText && Date.now() < statsErrorUntilMs) {
+					document.getElementById("meta").textContent = "Failed to load stats: " + statsErrorText;
+					return;
+				}
+				document.getElementById("meta").textContent = "Updated: " + new Date().toLocaleTimeString() + " | Next update: " + getStatsRemainingSeconds() + "s";
+			}
+
 			function render(s) {
 				var ble = "";
 				ble += mkStat("Adverts/min", s.advertsSeenPerMinute || 0, "openAdvertsHistory", "Total BLE advertisements seen per minute. Click to view recent history.");
@@ -439,7 +449,7 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				document.getElementById("memStats").innerHTML = mem;
 				renderUnknownTypes(s.unknownTypes || []);
 
-				document.getElementById("meta").textContent = "Updated: " + new Date().toLocaleTimeString() + " | Next update: " + getStatsRemainingSeconds() + "s";
+				updateStatsMeta();
 			}
 
 			function typeHex(v) {
@@ -455,24 +465,80 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				return "-";
 			}
 
-			function renderUnknownTypes(types) {
+			var unknownTypesData = [];
+			var unknownTypesSortCol = 'count';
+			var unknownTypesSortAsc = false;
+
+			function sortAndRenderUnknownTypes() {
 				var host = document.getElementById("unknownTypes");
-				if (!types || !types.length) {
+				if (!unknownTypesData || !unknownTypesData.length) {
 					host.innerHTML = '<div class="unknown-empty">No unknown types seen yet.</div>';
 					return;
 				}
-
-				types = types.slice().sort(function(a, b) { return (b.count || 0) - (a.count || 0); });
+				var col = unknownTypesSortCol;
+				var asc = unknownTypesSortAsc;
+				var sorted = unknownTypesData.slice().sort(function(a, b) {
+					if (col === 'count') {
+						var diff = (Number(a.count || 0)) - (Number(b.count || 0));
+						return asc ? diff : -diff;
+					} else if (col === 'mac') {
+						var ma = (a.mac || '').toUpperCase();
+						var mb = (b.mac || '').toUpperCase();
+						var diff = ma < mb ? -1 : ma > mb ? 1 : 0;
+						return asc ? diff : -diff;
+					} else {
+						var ta = (Number(a.type || 0) & 0xFF);
+						var tb = (Number(b.type || 0) & 0xFF);
+						var sa = a.subtype || '';
+						var sb = b.subtype || '';
+						var keyA = typeHex(ta) + '|' + sa;
+						var keyB = typeHex(tb) + '|' + sb;
+						var diff = keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
+						return asc ? diff : -diff;
+					}
+				});
+				function thStyle(col2) {
+					return ' style="cursor:pointer;user-select:none;" onclick="unknownTypesSortBy(\'' + col2 + '\')"';
+				}
+				function sortArrow(col2) {
+					if (unknownTypesSortCol !== col2) return '';
+					return unknownTypesSortAsc ? ' &#9650;' : ' &#9660;';
+				}
 				var h = '';
 				h += '<table class="unknown-table">';
-				h += '<thead><tr><th>Type (Hex)</th><th>ASCII</th><th>Count</th></tr></thead><tbody>';
-				for (var i = 0; i < types.length; i++) {
-					var t = Number(types[i].type || 0) & 0xFF;
-					var c = Number(types[i].count || 0);
-					h += '<tr><td>' + typeHex(t) + '</td><td>' + typeChar(t) + '</td><td>' + c + '</td></tr>';
+				h += '<thead><tr>';
+				h += '<th' + thStyle('type') + '>Type (Hex)' + sortArrow('type') + '</th>';
+				h += '<th>ASCII</th>';
+				h += '<th' + thStyle('type') + '>Sub-type (Hex)' + sortArrow('type') + '</th>';
+				h += '<th' + thStyle('mac') + '>MAC' + sortArrow('mac') + '</th>';
+				h += '<th' + thStyle('count') + '>BLE Updates' + sortArrow('count') + '</th>';
+				h += '</tr></thead><tbody>';
+				for (var i = 0; i < sorted.length; i++) {
+					var t = Number(sorted[i].type || 0) & 0xFF;
+					var c = Number(sorted[i].count || 0);
+					var sub = sorted[i].subtype ? sorted[i].subtype : '-';
+					var mac = sorted[i].mac ? sorted[i].mac : '-';
+					h += '<tr><td>' + typeHex(t) + '</td><td>' + typeChar(t) + '</td><td>' + sub + '</td><td>' + mac + '</td><td>' + c + '</td></tr>';
 				}
 				h += '</tbody></table>';
 				host.innerHTML = h;
+			}
+
+			function unknownTypesSortBy(col) {
+				if (unknownTypesSortCol === col) {
+					unknownTypesSortAsc = !unknownTypesSortAsc;
+				} else {
+					unknownTypesSortCol = col;
+					unknownTypesSortAsc = col === 'type';
+				}
+				sortAndRenderUnknownTypes();
+			}
+
+			function renderUnknownTypes(types) {
+				unknownTypesData = types || [];
+				var titleEl = document.getElementById('unknownDevicesTitle');
+				if (titleEl) titleEl.textContent = 'Unknown Devices (' + unknownTypesData.length + ')';
+				sortAndRenderUnknownTypes();
 			}
 
 			function closeFreeHeapHistory() {
@@ -594,16 +660,25 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				}
 			});
 
+			function isHistoryChartOpen() {
+				return document.getElementById("heapHistoryModal").style.display === "flex";
+			}
+
 			function loadStats() {
 				if (statsFetchInFlight) return;
 				statsFetchInFlight = true;
 				fetch("/api/v1/stats", { headers: { Accept: "application/json" } })
 					.then(function(r) { return r.json(); })
 					.then(function(s) {
+						statsErrorText = "";
+						statsErrorUntilMs = 0;
 						lastStats = s;
 						statsClockOffsetMs = Date.now() - (s.uptimeMs || 0);
 						nextStatsServerMs = (s.lastStatsAtMs || 0) + (s.statsIntervalMs || 15000);
 						render(s);
+						if (isHistoryChartOpen() && chartConfig && chartConfig.url) {
+							loadHistoryChart();
+						}
 
 						var serverNowMs = Date.now() - statsClockOffsetMs;
 						var msUntilNext = Math.max(250, nextStatsServerMs - serverNowMs + 50);
@@ -611,7 +686,9 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 						statsRefreshTimer = setTimeout(loadStats, msUntilNext);
 					})
 					.catch(function(e) {
-						document.getElementById("meta").textContent = "Failed to load stats: " + e;
+						statsErrorText = String(e);
+						statsErrorUntilMs = Date.now() + 15000;
+						updateStatsMeta();
 						if (statsRefreshTimer) clearTimeout(statsRefreshTimer);
 						statsRefreshTimer = setTimeout(loadStats, 5000);
 					})
@@ -1306,7 +1383,7 @@ unsigned long nextStatsSample = 0;
 const uint32_t STATS_SAMPLE_MS = 15000;
 const uint32_t STATS_PER_MINUTE_SCALE = 60000 / STATS_SAMPLE_MS;
 const uint16_t FREE_HEAP_HISTORY_MAX = 1000;
-const uint8_t UNKNOWN_TYPE_MAX = 32;
+const uint8_t UNKNOWN_TYPE_MAX = 100;
 const uint8_t HOMEY_HISTORY_MAX = 10;
 
 struct PUSH_UPDATE_LOG_ENTRY
@@ -1348,6 +1425,11 @@ uint16_t BleRateHistoryCount = 0;
 struct UNKNOWN_TYPE_ENTRY
 {
 	uint8_t type;
+	uint8_t subtypeB0;
+	uint8_t subtypeB1;
+	uint8_t subtypeB2;
+	bool hasSubtype;
+	char mac[ 18 ];
 	uint32_t count;
 };
 UNKNOWN_TYPE_ENTRY UnknownTypes[ UNKNOWN_TYPE_MAX ];
@@ -1556,12 +1638,19 @@ static void UpdateBleCommandResult( const char* sourceIp, const char* address, c
 	}
 }
 
-static void RecordUnknownType( uint8_t type )
+static void RecordUnknownType( uint8_t type, const char* mac, bool hasSubtype = false, uint8_t b0 = 0, uint8_t b1 = 0, uint8_t b2 = 0 )
 {
 	for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
 	{
-		if ( UnknownTypes[ i ].type == type )
+		if ( mac != nullptr && UnknownTypes[ i ].mac[ 0 ] != '\0' &&
+			 strncmp( UnknownTypes[ i ].mac, mac, sizeof( UnknownTypes[ i ].mac ) ) == 0 )
 		{
+			// Update type info in case it changes and increment count
+			UnknownTypes[ i ].type = type;
+			UnknownTypes[ i ].hasSubtype = hasSubtype;
+			UnknownTypes[ i ].subtypeB0 = b0;
+			UnknownTypes[ i ].subtypeB1 = b1;
+			UnknownTypes[ i ].subtypeB2 = b2;
 			UnknownTypes[ i ].count++;
 			return;
 		}
@@ -1570,6 +1659,19 @@ static void RecordUnknownType( uint8_t type )
 	if ( UnknownTypeCount < UNKNOWN_TYPE_MAX )
 	{
 		UnknownTypes[ UnknownTypeCount ].type = type;
+		UnknownTypes[ UnknownTypeCount ].hasSubtype = hasSubtype;
+		UnknownTypes[ UnknownTypeCount ].subtypeB0 = b0;
+		UnknownTypes[ UnknownTypeCount ].subtypeB1 = b1;
+		UnknownTypes[ UnknownTypeCount ].subtypeB2 = b2;
+		if ( mac != nullptr )
+		{
+			strncpy( UnknownTypes[ UnknownTypeCount ].mac, mac, sizeof( UnknownTypes[ UnknownTypeCount ].mac ) - 1 );
+			UnknownTypes[ UnknownTypeCount ].mac[ sizeof( UnknownTypes[ UnknownTypeCount ].mac ) - 1 ] = '\0';
+		}
+		else
+		{
+			UnknownTypes[ UnknownTypeCount ].mac[ 0 ] = '\0';
+		}
 		UnknownTypes[ UnknownTypeCount ].count = 1;
 		UnknownTypeCount++;
 	}
@@ -1801,7 +1903,15 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			{
 				if ( failedValidation && unknownType )
 				{
-					RecordUnknownType( serviceDataBuf[ 0 ] );
+					const char* devMac = advertisedDevice->getAddress().toString().c_str();
+					if ( serviceDataBuf[ 0 ] == 0 && serviceData.length() >= 7 )
+					{
+						RecordUnknownType( serviceDataBuf[ 0 ], devMac, true, serviceDataBuf[ 4 ], serviceDataBuf[ 5 ], serviceDataBuf[ 6 ] );
+					}
+					else
+					{
+						RecordUnknownType( serviceDataBuf[ 0 ], devMac );
+					}
 					NumMatchedRejected++;
 				}
 				else if ( failedValidation )
@@ -2316,7 +2426,18 @@ void setup()
 			out += ",\"unknownTypes\":[";
 			for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
 			{
-				out += "{\"type\":" + String( UnknownTypes[ i ].type ) + ",\"count\":" + String( UnknownTypes[ i ].count ) + "}";
+				out += "{\"type\":" + String( UnknownTypes[ i ].type );
+				if ( UnknownTypes[ i ].hasSubtype )
+				{
+					char subtypeBuf[ 20 ];
+					snprintf( subtypeBuf, sizeof( subtypeBuf ), "%02X%02X%02X", UnknownTypes[ i ].subtypeB0, UnknownTypes[ i ].subtypeB1, UnknownTypes[ i ].subtypeB2 );
+					out += ",\"subtype\":\"" + String( subtypeBuf ) + "\"";
+				}
+				if ( UnknownTypes[ i ].mac[ 0 ] != '\0' )
+				{
+					out += ",\"mac\":\"" + JsonEscape( UnknownTypes[ i ].mac ) + "\"";
+				}
+				out += ",\"count\":" + String( UnknownTypes[ i ].count ) + "}";
 				if ( i + 1 < UnknownTypeCount )
 				{
 					out += ",";
