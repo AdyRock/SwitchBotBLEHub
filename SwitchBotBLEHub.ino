@@ -34,7 +34,7 @@
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.11";
+const char* version = "Hello! SwitchBot BLE Hub V2.12";
 
 static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* key, String& value )
 {
@@ -341,7 +341,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
     <div class="wrap">
       <div class="card">
         <h1>SwitchBot BLE Hub</h1>
-        <p class="ver">Version 2.11</p>
+        <p class="ver">Version 2.12</p>
         <div class="links">
           <a class="btn" href="/update">Update firmware</a>
 					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
