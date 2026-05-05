@@ -355,7 +355,7 @@ int BLE_Device::FindDevice( const char* MAC )
 	return -1;
 }
 
-bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
+bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t addrType, uint8_t* BLEData,
 							uint8_t BLEDataSize, uint8_t* ManufactureData,
 							uint8_t ManufactureDataSize, bool* dataUpdated,
 							bool* failedValidation, bool* unknownType )
@@ -505,6 +505,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 	BLE_devices[ NumDevices ].Changed = true;
 	BLE_devices[ NumDevices ].rssi	  = rssi;
 	BLE_devices[ NumDevices ].LastRssiUpdateMs = millis();
+	BLE_devices[ NumDevices ].addrType = addrType;
 
 	// Serial.printf("Added %s @ %i = %c\n",  BLE_devices[ NumDevices ].MAC,
 	// NumDevices, BLEData[ 0 ] );
@@ -517,6 +518,16 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
 	}
 
 	return true;
+}
+
+uint8_t BLE_Device::GetDeviceAddressType( const char* MAC )
+{
+	int i = FindDevice( MAC );
+	if ( i >= 0 )
+	{
+		return BLE_devices[ i ].addrType;
+	}
+	return 0; // default to public if not found
 }
 
 // Return true if the device data is the same

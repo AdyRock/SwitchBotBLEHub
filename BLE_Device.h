@@ -38,6 +38,7 @@ struct BLE_DEVICE
 	uint8_t Data[ 21 ];
 	uint8_t DataSize;
 	bool Changed;
+	uint8_t addrType; // BLE address type (e.g. BLE_ADDR_RANDOM=1, BLE_ADDR_PUBLIC=0)
 };
 
 struct SWICHBOT_BOT
@@ -177,10 +178,11 @@ class BLE_Device
 	~BLE_Device();
 
 	int FindDevice( const char* MAC );
-	bool AddDevice( const char* MAC, int rssi, uint8_t* BLEData,
+	bool AddDevice( const char* MAC, int rssi, uint8_t addrType, uint8_t* BLEData,
 					uint8_t BLEDataSize, uint8_t* ManufactureData,
 					uint8_t ManufactureDataSize, bool* dataUpdated = nullptr,
 					bool* failedValidation = nullptr, bool* unknownType = nullptr );
+	uint8_t GetDeviceAddressType( const char* MAC );
 	bool UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 					   uint8_t BLEDataSize, uint8_t* ManufactureData,
 					   uint8_t ManufactureDataSize );

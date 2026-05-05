@@ -439,6 +439,7 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 
 			function render(s) {
 				var ble = "";
+				ble += mkStat("Registered devices", s.registeredDevices || 0, null, "Number of known SwitchBot devices currently registered (max 50).");
 				ble += mkStat("Adverts/min", s.advertsSeenPerMinute || 0, "openAdvertsHistory", "Total BLE advertisements seen per minute. Click to view recent history.");
 				ble += mkStat("UUID match/min", s.matchedServiceDataPerMinute || 0, null, "Advertisements per minute matching supported SwitchBot service UUIDs.");
 				ble += mkStat("Empty payload/min", s.matchedEmptyPayloadPerMinute || 0, null, "Matched advertisements per minute that had no service payload data.");
@@ -1965,7 +1966,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			bool dataUpdated = false;
 			bool failedValidation = false;
 			bool unknownType = false;
-			if ( BLE_Devices.AddDevice( deviceAddressCStr, advertisedDevice->getRSSI(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length(), &dataUpdated, &failedValidation, &unknownType ) )
+			if ( BLE_Devices.AddDevice( deviceAddressCStr, advertisedDevice->getRSSI(), advertisedDevice->getAddress().getType(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )advertisedDevice->getManufacturerData().data(), advertisedDevice->getManufacturerData().length(), &dataUpdated, &failedValidation, &unknownType ) )
 			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 				NumUpdates++;
@@ -2525,6 +2526,7 @@ void setup()
 			STATS_APPEND( ",\"lastStatsAtMs\":%lu", ( unsigned long )LastStatsAt );
 			STATS_APPEND( ",\"statsIntervalMs\":%lu", ( unsigned long )STATS_SAMPLE_MS );
 			STATS_APPEND( ",\"cpuUsage\":%u", ( unsigned )LastCpuUsagePercent );
+			STATS_APPEND( ",\"registeredDevices\":%u", ( unsigned )BLE_Devices.GetNumberOfDevices() );
 			STATS_APPEND( ",\"unknownTypes\":[" );
 			for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
 			{
@@ -2589,7 +2591,7 @@ void setup()
 	pBLEScan->setInterval( 510 );
 	pBLEScan->setWindow( 200 );
 	pBLEScan->setActiveScan( true );
-	pBLEScan->setMaxResults( 20 );
+	pBLEScan->setMaxResults( 0 ); // disable result storage - callbacks fire for all devices; use direct address connect for BLE commands
 	pBLEScan->start( 0, false, true );
 
 	Serial.println( "Application started" );
@@ -2832,31 +2834,17 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 	FormatBleCommandData( BLECommand, commandDataText, sizeof( commandDataText ) );
 	const char* finalResult = "error-device-not-found";
 
-	const BLEAddress bleAddress( BLECommand->Address, 0 );
 	Serial.printf( "Sending command to BLE device: %s\n", BLECommand->Address );
-	uint64_t requestAddress = bleAddress;
 
-	NimBLEScanResults results = pBLEScan->getResults();
-	uint8_t numResults = results.getCount();
-	const NimBLEAdvertisedDevice* pDevice = nullptr;
-	for ( int i = 0; i < numResults; i++ )
-	{
-		pDevice = results.getDevice( i );
-
-		uint64_t deviceAddress = pDevice->getAddress();
-		if ( deviceAddress == requestAddress )
-		{
-			Serial.println( "Found the Device in the scan" );
-			break;
-		}
-
-		pDevice = nullptr;
-	}
+	// Look up the BLE address type stored when the device was first seen during scanning.
+	// This avoids a separate scan just to resolve the address type.
+	uint8_t addrType = BLE_Devices.GetDeviceAddressType( BLECommand->Address );
+	NimBLEAddress bleAddress( std::string( BLECommand->Address ), addrType );
+	Serial.printf( "Using stored address type %u for %s\n", addrType, BLECommand->Address );
 
 	pBLEScan->stop();
 	delay( 100 );
 
-	if ( pDevice != nullptr )
 	{
 		NimBLEClient* pBLEClient = NimBLEDevice::createClient();
 		pBLEClient->setConnectTimeout( 5 * 1000 );
@@ -2867,7 +2855,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
 		while ( !complete && ( retries-- > 0 ) )
 		{
-			if ( pBLEClient->connect( pDevice, false, false, false ) )
+			if ( pBLEClient->connect( bleAddress ) )
 			{
 				Serial.println( "Device connected" );
 
@@ -2997,10 +2985,6 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 		}
 
 		NimBLEDevice::deleteClient( pBLEClient );
-	}
-	else
-	{
-		Serial.println( "Device not found (3)" );
 	}
 
 	UpdateBleCommandResult( BLECommand->ReplyTo, BLECommand->Address, commandDataText, finalResult );
