@@ -1,19 +1,19 @@
 /*
-	<SwitchBotBLEHub:- Turn a ESP32 Arduio compatible board into a hub>
-	Copyright (C) <2020>  <Adrian Rockall>
+    <SwitchBotBLEHub:- Turn a ESP32 Arduio compatible board into a hub>
+    Copyright (C) <2020>  <Adrian Rockall>
 
-	This program is free software: you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
 
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
 
-	You should have received a copy of the GNU General Public License
-	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "Arduino.h"
@@ -22,62 +22,62 @@
 #include <string.h>
 
 #define BULB_DATA_SIZE 14
-#define BULB_DATA_ID   'u'
+#define BULB_DATA_ID 'u'
 
 #define IOTH_DATA_SIZE 15
-#define IOTH_DATA_ID   'w'
-#define IOTH_DATA_ID2  'W'
+#define IOTH_DATA_ID 'w'
+#define IOTH_DATA_ID2 'W'
 
-#define BLIND_DATASIZE	12
+#define BLIND_DATASIZE 12
 #define BLIND_DATASIZE2 14
-#define BLIND_DATA_ID	'x'
+#define BLIND_DATA_ID 'x'
 
 #define TH_I_DATA_SIZE 6
-#define TH_I_DATA_ID   'i'
+#define TH_I_DATA_ID 'i'
 
 #define TH_T_DATA_SIZE 6
-#define TH_T_DATA_ID   'T'
+#define TH_T_DATA_ID 'T'
 
 #define BOT_DATA_SIZE 3
-#define BOT_DATA_ID	  'H'
+#define BOT_DATA_ID 'H'
 
 #define CURTAIN_DATA_SIZE 6
-#define CURTAIN_DATA_ID	  'c'
+#define CURTAIN_DATA_ID 'c'
 
 #define CURTAIN3_DATA_SIZE 6
-#define CURTAIN3_DATA_ID   '{'
+#define CURTAIN3_DATA_ID '{'
 
 #define ROLLERBLIND_DATA_SIZE 4
-#define ROLLERBLIND_DATA_ID   '\''
-#define ROLLERBLIND2_DATA_ID  ','
+#define ROLLERBLIND_DATA_ID '\''
+#define ROLLERBLIND2_DATA_ID ','
 
 #define PRESENCE_DATA_SIZE 6
-#define PRESENCE_DATA_ID   's'
+#define PRESENCE_DATA_ID 's'
 
 #define CONTACT_DATA_SIZE 9
-#define CONTACT_DATA_ID	  'd'
+#define CONTACT_DATA_ID 'd'
 
 #define REMOTE_DATA_SIZE 4
-#define REMOTE_DATA_ID	 'b'
+#define REMOTE_DATA_ID 'b'
 
 #define WATERLEAK_DATA_SIZE 22
-#define WATERLEAK_DATA_ID	'&'
+#define WATERLEAK_DATA_ID '&'
 
 #define PLUG_DATA_SIZE 15
-#define PLUG_DATA_ID	 '?'
+#define PLUG_DATA_ID '?'
 #define PLUG_RSSI_UPDATE_MS 5000
 
 #define METERPRO_DATA_SIZE 12
-#define METERPRO_DATA_ID	'4'
+#define METERPRO_DATA_ID '4'
 
 #define METERPROCO2_DATA_SIZE 16
-#define METERPROCO2_DATA_ID	'5'
+#define METERPROCO2_DATA_ID '5'
 
-#define USE_LONG_DATA_ID	0
+#define USE_LONG_DATA_ID 0
 
 #define PRESENCE2_DATA_SIZE 14
-uint8_t PRESENCE2_DATA_LONG_ID1[ 3 ] = {0x00, 0xcc, 0xc8};
-uint8_t PRESENCE2_DATA_LONG_ID2[ 3 ] = {0x10, 0xcc, 0xc8};
+uint8_t PRESENCE2_DATA_LONG_ID1[ 3 ] = { 0x00, 0xcc, 0xc8 };
+uint8_t PRESENCE2_DATA_LONG_ID2[ 3 ] = { 0x10, 0xcc, 0xc8 };
 
 void printHex( uint8_t* data, uint8_t len )
 {
@@ -111,183 +111,183 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 
 	switch ( Type )
 	{
-		case BULB_DATA_ID:
-			if ( ManufactureDataSize >= BULB_DATA_SIZE - 1 )
-			{
-				return true;
-			}
-			expected_size = BULB_DATA_SIZE - 1;
-			break;
+	case BULB_DATA_ID:
+		if ( ManufactureDataSize >= BULB_DATA_SIZE - 1 )
+		{
+			return true;
+		}
+		expected_size = BULB_DATA_SIZE - 1;
+		break;
 
-		case IOTH_DATA_ID:
-		case IOTH_DATA_ID2:
-			if ( ManufactureDataSize >= IOTH_DATA_SIZE - 1 )
-			{
-				return true;
-			}
-			expected_size = IOTH_DATA_SIZE - 1;
-			break;
+	case IOTH_DATA_ID:
+	case IOTH_DATA_ID2:
+		if ( ManufactureDataSize >= IOTH_DATA_SIZE - 1 )
+		{
+			return true;
+		}
+		expected_size = IOTH_DATA_SIZE - 1;
+		break;
 
-		case BLIND_DATA_ID:
-			if ( ( ManufactureDataSize >= BLIND_DATASIZE - 1 ) ||
-				 ( ManufactureDataSize >= BLIND_DATASIZE2 - 1 ) )
-			{
-				return true;
-			}
-			expected_size = BLIND_DATASIZE - 1;
-			break;
+	case BLIND_DATA_ID:
+		if ( ( ManufactureDataSize >= BLIND_DATASIZE - 1 ) ||
+		     ( ManufactureDataSize >= BLIND_DATASIZE2 - 1 ) )
+		{
+			return true;
+		}
+		expected_size = BLIND_DATASIZE - 1;
+		break;
 
-		case WATERLEAK_DATA_ID:
-			if ( ManufactureDataSize >= WATERLEAK_DATA_SIZE - 1 )
-			{
-				return true;
-			}
-			expected_size = WATERLEAK_DATA_SIZE - 1;
-			break;
+	case WATERLEAK_DATA_ID:
+		if ( ManufactureDataSize >= WATERLEAK_DATA_SIZE - 1 )
+		{
+			return true;
+		}
+		expected_size = WATERLEAK_DATA_SIZE - 1;
+		break;
 
-		case PLUG_DATA_ID:
-			if ( ManufactureDataSize >= PLUG_DATA_SIZE - 1 )
-			{
-				return true;
-			}
-			expected_size = PLUG_DATA_SIZE - 1;
-			break;
+	case PLUG_DATA_ID:
+		if ( ManufactureDataSize >= PLUG_DATA_SIZE - 1 )
+		{
+			return true;
+		}
+		expected_size = PLUG_DATA_SIZE - 1;
+		break;
 
-		case METERPRO_DATA_ID:
-			if ( ManufactureDataSize >= METERPRO_DATA_SIZE - 1 )
-			{
-				return true;
-			}
-			expected_size = METERPRO_DATA_SIZE - 1;
-			break;
+	case METERPRO_DATA_ID:
+		if ( ManufactureDataSize >= METERPRO_DATA_SIZE - 1 )
+		{
+			return true;
+		}
+		expected_size = METERPRO_DATA_SIZE - 1;
+		break;
 
-		case METERPROCO2_DATA_ID:
-			if ( ManufactureDataSize >= METERPROCO2_DATA_SIZE - 1 )
-			{
-				return true;
-			}
-			expected_size = METERPROCO2_DATA_SIZE - 1;
-			break;
+	case METERPROCO2_DATA_ID:
+		if ( ManufactureDataSize >= METERPROCO2_DATA_SIZE - 1 )
+		{
+			return true;
+		}
+		expected_size = METERPROCO2_DATA_SIZE - 1;
+		break;
 
-		case USE_LONG_DATA_ID:
-			if (BLEDataSize >= 7)
+	case USE_LONG_DATA_ID:
+		if ( BLEDataSize >= 7 )
+		{
+			if ( ( ( PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[ 6 ] ) ) ||
+			     ( ( PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[ 6 ] ) ) )
 			{
-				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
-					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
+				if ( ManufactureDataSize >= PRESENCE2_DATA_SIZE - 1 )
 				{
-					if ( ManufactureDataSize >= PRESENCE2_DATA_SIZE - 1 )
-					{
-						return true;
-					}
-					expected_size = PRESENCE2_DATA_SIZE - 1;
+					return true;
 				}
-				else
-				{
-					// Serial.printf( "Unknown tribyte type %X, %X, %X\n", BLEData[4], BLEData[5], BLEData[6] );
-					// printHex( BLEData, BLEDataSize );
-				    if ( unknownType != nullptr )
-				    {
-					    *unknownType = true;
-				    }
-				    return false;
-			    }
+				expected_size = PRESENCE2_DATA_SIZE - 1;
 			}
+			else
+			{
+				// Serial.printf( "Unknown tribyte type %X, %X, %X\n", BLEData[4], BLEData[5], BLEData[6] );
+				// printHex( BLEData, BLEDataSize );
+				if ( unknownType != nullptr )
+				{
+					*unknownType = true;
+				}
+				return false;
+			}
+		}
+		break;
+
+	default:
+		switch ( Type )
+		{
+		case TH_I_DATA_ID:
+			if ( BLEDataSize >= TH_I_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = TH_I_DATA_SIZE;
+			break;
+
+		case TH_T_DATA_ID:
+			if ( BLEDataSize >= TH_T_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = TH_T_DATA_SIZE;
+			break;
+
+		case BOT_DATA_ID:
+			if ( BLEDataSize >= BOT_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = BOT_DATA_SIZE;
+			break;
+
+		case CURTAIN_DATA_ID:
+			if ( BLEDataSize >= CURTAIN_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = CURTAIN_DATA_SIZE;
+			break;
+
+		case CURTAIN3_DATA_ID:
+			if ( BLEDataSize >= CURTAIN3_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = CURTAIN3_DATA_SIZE;
+			break;
+
+		case ROLLERBLIND_DATA_ID:
+		case ROLLERBLIND2_DATA_ID:
+			if ( BLEDataSize >= ROLLERBLIND_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = ROLLERBLIND_DATA_SIZE;
+			break;
+
+		case PRESENCE_DATA_ID:
+			if ( BLEDataSize >= PRESENCE_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = PRESENCE_DATA_SIZE;
+			break;
+
+		case CONTACT_DATA_ID:
+			if ( BLEDataSize >= CONTACT_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = PRESENCE_DATA_SIZE;
+			break;
+
+		case REMOTE_DATA_ID:
+			if ( BLEDataSize >= REMOTE_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = PRESENCE_DATA_SIZE;
 			break;
 
 		default:
-			switch ( Type )
+			// Serial.printf( "Unknown type %c\n", Type );
+			// printHex( BLEData, BLEDataSize );
+			if ( unknownType != nullptr )
 			{
-				case TH_I_DATA_ID:
-					if ( BLEDataSize >= TH_I_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = TH_I_DATA_SIZE;
-					break;
-
-				case TH_T_DATA_ID:
-					if ( BLEDataSize >= TH_T_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = TH_T_DATA_SIZE;
-					break;
-
-				case BOT_DATA_ID:
-					if ( BLEDataSize >= BOT_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = BOT_DATA_SIZE;
-					break;
-
-				case CURTAIN_DATA_ID:
-					if ( BLEDataSize >= CURTAIN_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = CURTAIN_DATA_SIZE;
-					break;
-
-				case CURTAIN3_DATA_ID:
-					if ( BLEDataSize >= CURTAIN3_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = CURTAIN3_DATA_SIZE;
-					break;
-
-				case ROLLERBLIND_DATA_ID:
-				case ROLLERBLIND2_DATA_ID:
-					if ( BLEDataSize >= ROLLERBLIND_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = ROLLERBLIND_DATA_SIZE;
-					break;
-
-				case PRESENCE_DATA_ID:
-					if ( BLEDataSize >= PRESENCE_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = PRESENCE_DATA_SIZE;
-					break;
-
-				case CONTACT_DATA_ID:
-					if ( BLEDataSize >= CONTACT_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = PRESENCE_DATA_SIZE;
-					break;
-
-				case REMOTE_DATA_ID:
-					if ( BLEDataSize >= REMOTE_DATA_SIZE )
-					{
-						return true;
-					}
-					expected_size = PRESENCE_DATA_SIZE;
-					break;
-
-				default:
-					// Serial.printf( "Unknown type %c\n", Type );
-					// printHex( BLEData, BLEDataSize );
-					if ( unknownType != nullptr )
-					{
-						*unknownType = true;
-					}
-					return false;
+				*unknownType = true;
 			}
-
-			Serial.printf( "Invalid %c BLE data: expect size = %i, size = %i\n",
-						   Type, expected_size, BLEDataSize );
-			printHex( BLEData, BLEDataSize );
 			return false;
+		}
+
+		Serial.printf( "Invalid %c BLE data: expect size = %i, size = %i\n",
+		               Type, expected_size, BLEDataSize );
+		printHex( BLEData, BLEDataSize );
+		return false;
 	}
 
 	Serial.printf( "Invalid %c Manufacture data: expect size = %i, size = %i\n",
-				   Type, expected_size, ManufactureDataSize );
+	               Type, expected_size, ManufactureDataSize );
 	printHex( ManufactureData, ManufactureDataSize );
 	return false;
 }
@@ -325,7 +325,7 @@ static void toUpperInPlace( char* s )
 BLE_Device::BLE_Device()
 {
 	NumDevices = 0;
-	Changed	   = false;
+	Changed = false;
 
 	memset( BLE_devices, 0, sizeof( BLE_DEVICE ) * 50 );
 	// Serial.println( "BLE Device Class initialised" );
@@ -356,9 +356,9 @@ int BLE_Device::FindDevice( const char* MAC )
 }
 
 bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t addrType, uint8_t* BLEData,
-							uint8_t BLEDataSize, uint8_t* ManufactureData,
-							uint8_t ManufactureDataSize, bool* dataUpdated,
-							bool* failedValidation, bool* unknownType )
+                            uint8_t BLEDataSize, uint8_t* ManufactureData,
+                            uint8_t ManufactureDataSize, bool* dataUpdated,
+                            bool* failedValidation, bool* unknownType )
 {
 	if ( dataUpdated != nullptr )
 	{
@@ -416,94 +416,87 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t addrType, uint8_t
 
 	switch ( BLEData[ 0 ] )
 	{
-		case BULB_DATA_ID:
-		{
-			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-			BLE_devices[ NumDevices ].Data[ 0 ] = BULB_DATA_ID;
-			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
-			break;
-		}
+	case BULB_DATA_ID: {
+		// use manufacture data
+		memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+		BLE_devices[ NumDevices ].Data[ 0 ] = BULB_DATA_ID;
+		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+		break;
+	}
 
-		case IOTH_DATA_ID:
-		case IOTH_DATA_ID2:
-		{
-			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-			BLE_devices[ NumDevices ].Data[ 0 ] = BLEData[ 0 ];
-			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
-			break;
-		}
+	case IOTH_DATA_ID:
+	case IOTH_DATA_ID2: {
+		// use manufacture data
+		memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+		BLE_devices[ NumDevices ].Data[ 0 ] = BLEData[ 0 ];
+		BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+		break;
+	}
 
-		case WATERLEAK_DATA_ID:
-		{
-			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-			BLE_devices[ NumDevices ].Data[ 0 ] = WATERLEAK_DATA_ID;
-			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
-			break;
-		}
+	case WATERLEAK_DATA_ID: {
+		// use manufacture data
+		memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+		BLE_devices[ NumDevices ].Data[ 0 ] = WATERLEAK_DATA_ID;
+		BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+		break;
+	}
 
-		case PLUG_DATA_ID:
-		{
-			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-			BLE_devices[ NumDevices ].Data[ 0 ] = PLUG_DATA_ID;
-			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
-			break;
-		}
+	case PLUG_DATA_ID: {
+		// use manufacture data
+		memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+		BLE_devices[ NumDevices ].Data[ 0 ] = PLUG_DATA_ID;
+		BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+		break;
+	}
 
-		case METERPRO_DATA_ID:
-		{
-			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-			BLE_devices[ NumDevices ].Data[ 0 ] = METERPRO_DATA_ID;
-			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
-			break;
-		}
+	case METERPRO_DATA_ID: {
+		// use manufacture data
+		memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+		BLE_devices[ NumDevices ].Data[ 0 ] = METERPRO_DATA_ID;
+		BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+		break;
+	}
 
-		case METERPROCO2_DATA_ID:
-		{
-			// use manufacture data
-			memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
-			BLE_devices[ NumDevices ].Data[ 0 ] = METERPROCO2_DATA_ID;
-			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ NumDevices ].DataSize	= ManufactureDataSize + 1;
-			break;
-		}
+	case METERPROCO2_DATA_ID: {
+		// use manufacture data
+		memcpy( BLE_devices[ NumDevices ].Data + 1, ManufactureData, ManufactureDataSize );
+		BLE_devices[ NumDevices ].Data[ 0 ] = METERPROCO2_DATA_ID;
+		BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+		break;
+	}
 
-		default:
+	default: {
+		// Check for 3 byte identifier
+		if ( BLEDataSize >= 7 )
 		{
-			// Check for 3 byte identifier
-			if (BLEDataSize >= 7)
+			if ( ( ( PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[ 6 ] ) ) ||
+			     ( ( PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[ 6 ] ) ) )
 			{
-				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
-					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
-				{
-					// Presence (mmWave)
-					memcpy( BLE_devices[ NumDevices ].Data + 4, ManufactureData, ManufactureDataSize );
+				// Presence (mmWave)
+				memcpy( BLE_devices[ NumDevices ].Data + 4, ManufactureData, ManufactureDataSize );
 
-					// The first 4 bytes store the device tri-byte type and tr-byte identifier
-					BLE_devices[ NumDevices ].Data[ 0 ] = USE_LONG_DATA_ID;
-					BLE_devices[ NumDevices ].Data[ 1 ] = BLEData[ 4 ];
-					BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 5 ];
-					BLE_devices[ NumDevices ].Data[ 3 ] = BLEData[ 6 ];
-					BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 4;
-					printf( "added presence mm: Data size = %i\n", BLE_devices[ NumDevices ].DataSize);
-					break;
-				}
+				// The first 4 bytes store the device tri-byte type and tr-byte identifier
+				BLE_devices[ NumDevices ].Data[ 0 ] = USE_LONG_DATA_ID;
+				BLE_devices[ NumDevices ].Data[ 1 ] = BLEData[ 4 ];
+				BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 5 ];
+				BLE_devices[ NumDevices ].Data[ 3 ] = BLEData[ 6 ];
+				BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 4;
+				printf( "added presence mm: Data size = %i\n", BLE_devices[ NumDevices ].DataSize );
+				break;
 			}
-			memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
-			BLE_devices[ NumDevices ].DataSize = BLEDataSize;
 		}
+		memcpy( BLE_devices[ NumDevices ].Data, BLEData, BLEDataSize );
+		BLE_devices[ NumDevices ].DataSize = BLEDataSize;
+	}
 	}
 
 	BLE_devices[ NumDevices ].Changed = true;
-	BLE_devices[ NumDevices ].rssi	  = rssi;
+	BLE_devices[ NumDevices ].rssi = rssi;
 	BLE_devices[ NumDevices ].LastRssiUpdateMs = millis();
 	BLE_devices[ NumDevices ].addrType = addrType;
 
@@ -532,241 +525,226 @@ uint8_t BLE_Device::GetDeviceAddressType( const char* MAC )
 
 // Return true if the device data is the same
 bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
-								uint8_t BLEDataSize, uint8_t* ManufactureData,
-								uint8_t ManufactureDataSize )
+                                uint8_t BLEDataSize, uint8_t* ManufactureData,
+                                uint8_t ManufactureDataSize )
 {
 	switch ( BLEData[ 0 ] )
 	{
-		case BULB_DATA_ID:
-		case IOTH_DATA_ID:
-		case IOTH_DATA_ID2:
-		case BLIND_DATA_ID:
-		case WATERLEAK_DATA_ID:
-		case PLUG_DATA_ID:
-		case METERPRO_DATA_ID:
-		case METERPROCO2_DATA_ID:
+	case BULB_DATA_ID:
+	case IOTH_DATA_ID:
+	case IOTH_DATA_ID2:
+	case BLIND_DATA_ID:
+	case WATERLEAK_DATA_ID:
+	case PLUG_DATA_ID:
+	case METERPRO_DATA_ID:
+	case METERPROCO2_DATA_ID: {
+		if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 1 )
 		{
-			if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 1 )
-			{
-				// Different manufacture data size
-				return false;
-			}
-			break;
+			// Different manufacture data size
+			return false;
 		}
-		case USE_LONG_DATA_ID:
+		break;
+	}
+	case USE_LONG_DATA_ID: {
+		if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 4 )
 		{
-			if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 4 )
-			{
-				// Different manufacture data size
-				return false;
-			}
-			break;
+			// Different manufacture data size
+			return false;
 		}
-		default:
+		break;
+	}
+	default: {
+		if ( BLEDataSize != BLE_devices[ Index ].DataSize )
 		{
-			if ( BLEDataSize != BLE_devices[ Index ].DataSize )
-			{
-				// Different service data size
-				return false;
-			}
-			break;
+			// Different service data size
+			return false;
 		}
+		break;
+	}
 	}
 
 	switch ( BLEData[ 0 ] )
 	{
-		case PRESENCE_DATA_ID:
+	case PRESENCE_DATA_ID: {
+		// Compare the presence sensor differently as there are bytes that
+		// change continuosly
+		if ( ( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ) ||
+		     ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
+		     ( BLEData[ 5 ] != BLE_devices[ Index ].Data[ 5 ] ) )
 		{
-			// Compare the presence sensor differently as there are bytes that
-			// change continuosly
-			if ( ( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ) ||
-				 ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
-				 ( BLEData[ 5 ] != BLE_devices[ Index ].Data[ 5 ] ) )
-			{
-				return false;
-			}
-
-			break;
+			return false;
 		}
 
-		case CONTACT_DATA_ID:
-		{
-			// Compare the contact sensor differently as there are bytes that change
-			// continuosly
-			if ( ( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ) ||
-				 ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
-				 ( BLEData[ 3 ] != BLE_devices[ Index ].Data[ 3 ] ) ||
-				 ( BLEData[ 8 ] != BLE_devices[ Index ].Data[ 8 ] ) )
-			{
-				return false;
-			}
+		break;
+	}
 
-			break;
+	case CONTACT_DATA_ID: {
+		// Compare the contact sensor differently as there are bytes that change
+		// continuosly
+		if ( ( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ) ||
+		     ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
+		     ( BLEData[ 3 ] != BLE_devices[ Index ].Data[ 3 ] ) ||
+		     ( BLEData[ 8 ] != BLE_devices[ Index ].Data[ 8 ] ) )
+		{
+			return false;
 		}
 
-		case BULB_DATA_ID:
-		{
-			// Compare the bulb sensor differently as it uses manufacture data
-			if ( ( ManufactureData[ 8 ] != BLE_devices[ Index ].Data[ 9 ] ) ||
-				 ( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ] ) ||
-				 ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) )
-			{
-				return false;
-			}
+		break;
+	}
 
-			break;
+	case BULB_DATA_ID: {
+		// Compare the bulb sensor differently as it uses manufacture data
+		if ( ( ManufactureData[ 8 ] != BLE_devices[ Index ].Data[ 9 ] ) ||
+		     ( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ] ) ||
+		     ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) )
+		{
+			return false;
 		}
 
-		case IOTH_DATA_ID:
-		case IOTH_DATA_ID2:
-		case METERPRO_DATA_ID:
-		{
-			// Compare the IO TH sensor differently as it uses manufacture data
-			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
-				 ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) ||
-				 ( ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ] ) ||
-				 ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) )
-			{
-				return false;
-			}
+		break;
+	}
 
-			break;
+	case IOTH_DATA_ID:
+	case IOTH_DATA_ID2:
+	case METERPRO_DATA_ID: {
+		// Compare the IO TH sensor differently as it uses manufacture data
+		if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
+		     ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) ||
+		     ( ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ] ) ||
+		     ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) )
+		{
+			return false;
 		}
 
-		case BLIND_DATA_ID:
-		{
-			// Compare the blind / tilt differently as it uses manufacture data
-			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
-				 ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) )
-			{
-				return false;
-			}
+		break;
+	}
 
-			break;
+	case BLIND_DATA_ID: {
+		// Compare the blind / tilt differently as it uses manufacture data
+		if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
+		     ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) )
+		{
+			return false;
 		}
 
-		case WATERLEAK_DATA_ID:
-		{
-			// Compare the Water Leak sensor differently as it uses manufacture data
-			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
-				 ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) )
-			{
-				return false;
-			}
+		break;
+	}
 
-			break;
+	case WATERLEAK_DATA_ID: {
+		// Compare the Water Leak sensor differently as it uses manufacture data
+		if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
+		     ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) )
+		{
+			return false;
 		}
 
-		case PLUG_DATA_ID:
-		{
-			// Compare the plug differently - ignore wifiRSSI (ManufactureData[11])
-			// as it fluctuates constantly and would cause push notifications on every scan
-			if ( ( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ] ) ||
-				 ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) ||
-				 ( ManufactureData[ 13 ] != BLE_devices[ Index ].Data[ 14 ] ) )
-			{
-				return false;
-			}
+		break;
+	}
 
-			break;
+	case PLUG_DATA_ID: {
+		// Compare the plug differently - ignore wifiRSSI (ManufactureData[11])
+		// as it fluctuates constantly and would cause push notifications on every scan
+		if ( ( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 10 ] ) ||
+		     ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) ||
+		     ( ManufactureData[ 13 ] != BLE_devices[ Index ].Data[ 14 ] ) )
+		{
+			return false;
 		}
 
-		case METERPROCO2_DATA_ID:
-		{
-			// Compare the Meter Pro differently as it uses manufacture data
-			if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
-				 ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) ||
-				 ( ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ] ) ||
-				 ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) ||
-				 ( ManufactureData[ 15 ] != BLE_devices[ Index ].Data[ 16 ] ) ||
-				 ( ManufactureData[ 16 ] != BLE_devices[ Index ].Data[ 17 ] ) )
-			{
-				return false;
-			}
+		break;
+	}
 
-			break;
+	case METERPROCO2_DATA_ID: {
+		// Compare the Meter Pro differently as it uses manufacture data
+		if ( ( BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] ) ||
+		     ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 11 ] ) ||
+		     ( ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 12 ] ) ||
+		     ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 13 ] ) ||
+		     ( ManufactureData[ 15 ] != BLE_devices[ Index ].Data[ 16 ] ) ||
+		     ( ManufactureData[ 16 ] != BLE_devices[ Index ].Data[ 17 ] ) )
+		{
+			return false;
 		}
 
-		case USE_LONG_DATA_ID:
+		break;
+	}
+
+	case USE_LONG_DATA_ID: {
+		// Check for 3 byte identifier
+		if ( BLEDataSize >= 7 )
 		{
-			// Check for 3 byte identifier
-			if (BLEDataSize >= 7)
+			if ( ( ( PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[ 6 ] ) ) ||
+			     ( ( PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[ 6 ] ) ) )
 			{
-				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
-					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
+				// Presence (mmWave)
+				if ( ( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 9 + 4 ] ) ||
+				     ( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 10 + 4 ] ) ||
+				     ( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 12 + 4 ] ) ||
+				     ( ManufactureData[ 13 ] != BLE_devices[ Index ].Data[ 13 + 4 ] ) )
 				{
-					// Presence (mmWave)
-					if (( ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 9 + 4 ] ) ||
-							( ManufactureData[ 10 ] != BLE_devices[ Index ].Data[ 10 + 4 ] ) ||
-							( ManufactureData[ 12 ] != BLE_devices[ Index ].Data[ 12 + 4 ] ) ||
-							( ManufactureData[ 13 ] != BLE_devices[ Index ].Data[ 13 + 4 ] ))
-					{
-						return false;
-					}
+					return false;
 				}
-
-				break;
 			}
-		}
 
-		default:
-			return ( memcmp( BLE_devices[ Index ].Data, BLEData,
-							 BLE_devices[ Index ].DataSize ) == 0 );
+			break;
+		}
+	}
+
+	default:
+		return ( memcmp( BLE_devices[ Index ].Data, BLEData,
+		                 BLE_devices[ Index ].DataSize ) == 0 );
 	}
 
 	return true;
 }
 
 bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
-							   uint8_t BLEDataSize, uint8_t* ManufactureData,
-							   uint8_t ManufactureDataSize )
+                               uint8_t BLEDataSize, uint8_t* ManufactureData,
+                               uint8_t ManufactureDataSize )
 {
 	if ( !ValidateData( BLEData[ 0 ], BLEData, BLEDataSize, ManufactureData,
-						ManufactureDataSize ) )
+	                    ManufactureDataSize ) )
 	{
 		return false;
 	}
 
 	switch ( BLEData[ 0 ] )
 	{
-		case BULB_DATA_ID:
-		case IOTH_DATA_ID:
-		case IOTH_DATA_ID2:
-		case BLIND_DATA_ID:
-		case WATERLEAK_DATA_ID:
-		case PLUG_DATA_ID:
-		case METERPRO_DATA_ID:
-		case METERPROCO2_DATA_ID:
-		{
-			memcpy( BLE_devices[ Index ].Data + 1, ManufactureData,
-					ManufactureDataSize );
-			BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
-			BLE_devices[ Index ].DataSize  = ManufactureDataSize + 1;
+	case BULB_DATA_ID:
+	case IOTH_DATA_ID:
+	case IOTH_DATA_ID2:
+	case BLIND_DATA_ID:
+	case WATERLEAK_DATA_ID:
+	case PLUG_DATA_ID:
+	case METERPRO_DATA_ID:
+	case METERPROCO2_DATA_ID: {
+		memcpy( BLE_devices[ Index ].Data + 1, ManufactureData,
+		        ManufactureDataSize );
+		BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
+		BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
 
-			break;
-		}
+		break;
+	}
 
-		case USE_LONG_DATA_ID:
+	case USE_LONG_DATA_ID: {
+		if ( BLEDataSize >= 7 )
 		{
-			if (BLEDataSize >= 7)
+			if ( ( ( PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[ 6 ] ) ) ||
+			     ( ( PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[ 4 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[ 5 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[ 6 ] ) ) )
 			{
-				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == BLEData[6])) ||
-					 ((PRESENCE2_DATA_LONG_ID2[ 0 ] == BLEData[4]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == BLEData[5]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == BLEData[6])))
-				{
-					memcpy( BLE_devices[ Index ].Data + 4, ManufactureData, ManufactureDataSize );
-					BLE_devices[ Index ].DataSize	= ManufactureDataSize + 4;
-					break;
-				}
+				memcpy( BLE_devices[ Index ].Data + 4, ManufactureData, ManufactureDataSize );
+				BLE_devices[ Index ].DataSize = ManufactureDataSize + 4;
+				break;
 			}
 		}
+	}
 
-		default:
-		{
-			memcpy( BLE_devices[ Index ].Data, BLEData, BLEDataSize );
-			BLE_devices[ Index ].DataSize = BLEDataSize;
+	default: {
+		memcpy( BLE_devices[ Index ].Data, BLEData, BLEDataSize );
+		BLE_devices[ Index ].DataSize = BLEDataSize;
 
-			break;
-		}
+		break;
+	}
 	}
 
 	if ( BLEData[ 0 ] == PLUG_DATA_ID )
@@ -777,7 +755,7 @@ bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		// UpdateDevice is only called here when something meaningful has changed.
 		uint32_t now = millis();
 		if ( ( uint32_t )( now - BLE_devices[ Index ].LastRssiUpdateMs ) >=
-			 PLUG_RSSI_UPDATE_MS )
+		     PLUG_RSSI_UPDATE_MS )
 		{
 			BLE_devices[ Index ].rssi = rssi;
 			BLE_devices[ Index ].LastRssiUpdateMs = now;
@@ -789,7 +767,7 @@ bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		BLE_devices[ Index ].LastRssiUpdateMs = millis();
 	}
 	BLE_devices[ Index ].Changed = true;
-	Changed						 = true;
+	Changed = true;
 
 	return true;
 
@@ -813,15 +791,15 @@ bool BLE_Device::GetSWDevice( uint8_t Index, SWITCHBOT& Device )
 }
 
 int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
-							  char* macAddress )
+                              char* macAddress )
 {
 	SWITCHBOT Device;
 	if ( GetSWDevice( Index, Device ) )
 	{
 		int bytes = snprintf( Buf, BufSize,
-							  "{\"hubMAC\":\"%s\",\"address\":\"%s\",\"rssi\":%"
-							  "i,\"serviceData\":",
-							  macAddress, Device.MAC, Device.rssi );
+		                      "{\"hubMAC\":\"%s\",\"address\":\"%s\",\"rssi\":%"
+		                      "i,\"serviceData\":",
+		                      macAddress, Device.MAC, Device.rssi );
 
 		int rem = BufSize - bytes;
 		if ( rem < 64 )
@@ -832,236 +810,220 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 
 		switch ( Device.model )
 		{
-			case CURTAIN_DATA_ID:
-			{
-				bytes += snprintf(
-					Buf + bytes, rem,
-					"{\"model\":\"%c\",\"modelName\":\"WoCurtain\",\"calibration\":"
-					"%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
-					Device.model, ( Device.curtain.calibration ? "true" : "false" ),
-					Device.curtain.battery, Device.curtain.position,
-					Device.curtain.lightLevel );
+		case CURTAIN_DATA_ID: {
+			bytes += snprintf(
+			    Buf + bytes, rem,
+			    "{\"model\":\"%c\",\"modelName\":\"WoCurtain\",\"calibration\":"
+			    "%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
+			    Device.model, ( Device.curtain.calibration ? "true" : "false" ),
+			    Device.curtain.battery, Device.curtain.position,
+			    Device.curtain.lightLevel );
 
-				break;
-			}
+			break;
+		}
 
-			case CURTAIN3_DATA_ID:
-			{
-				bytes += snprintf(
-					Buf + bytes, BufSize - bytes,
-					"{\"model\":\"%c\",\"modelName\":\"WoCurtain3\","
-					"\"calibration\":%s,\"battery\":%i,\"position\":%i,"
-					"\"lightLevel\":%i}}",
-					Device.model, ( Device.curtain.calibration ? "true" : "false" ),
-					Device.curtain.battery, Device.curtain.position,
-					Device.curtain.lightLevel );
+		case CURTAIN3_DATA_ID: {
+			bytes += snprintf(
+			    Buf + bytes, BufSize - bytes,
+			    "{\"model\":\"%c\",\"modelName\":\"WoCurtain3\","
+			    "\"calibration\":%s,\"battery\":%i,\"position\":%i,"
+			    "\"lightLevel\":%i}}",
+			    Device.model, ( Device.curtain.calibration ? "true" : "false" ),
+			    Device.curtain.battery, Device.curtain.position,
+			    Device.curtain.lightLevel );
 
-				break;
-			}
+			break;
+		}
 
-			case ROLLERBLIND_DATA_ID:
-			case ROLLERBLIND2_DATA_ID:
-			{
-				bytes += snprintf(
-					Buf + bytes, BufSize - bytes,
-					"{\"model\":\"%c\",\"modelName\":\"WoRollerBlind\","
-					"\"calibration\":%s,\"battery\":%i,\"position\":%i}}",
-					Device.model, ( Device.curtain.calibration ? "true" : "false" ),
-					Device.curtain.battery, Device.curtain.position );
+		case ROLLERBLIND_DATA_ID:
+		case ROLLERBLIND2_DATA_ID: {
+			bytes += snprintf(
+			    Buf + bytes, BufSize - bytes,
+			    "{\"model\":\"%c\",\"modelName\":\"WoRollerBlind\","
+			    "\"calibration\":%s,\"battery\":%i,\"position\":%i}}",
+			    Device.model, ( Device.curtain.calibration ? "true" : "false" ),
+			    Device.curtain.battery, Device.curtain.position );
 
-				break;
-			}
+			break;
+		}
 
-			case BLIND_DATA_ID:
-			{
-				bytes +=
-					snprintf( Buf + bytes, BufSize - bytes,
-							  "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\","
-							  "\"battery\":%i,\"position\":%i,\"version\":%i}}",
-							  Device.model, Device.blind.battery,
-							  Device.blind.position, Device.blind.version );
+		case BLIND_DATA_ID: {
+			bytes +=
+			    snprintf( Buf + bytes, BufSize - bytes,
+			              "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\","
+			              "\"battery\":%i,\"position\":%i,\"version\":%i}}",
+			              Device.model, Device.blind.battery,
+			              Device.blind.position, Device.blind.version );
 
-				break;
-			}
+			break;
+		}
 
-			case BOT_DATA_ID:
-			{
-				bytes +=
-					snprintf( Buf + bytes, BufSize - bytes,
-							  "{\"model\":\"%c\",\"modelName\":\"WoHand\",\"mode\":"
-							  "%s,\"battery\":%i,\"state\":%i}}",
-							  Device.model, ( Device.bot.mode ? "true" : "false" ),
-							  Device.bot.battery, Device.bot.state );
+		case BOT_DATA_ID: {
+			bytes +=
+			    snprintf( Buf + bytes, BufSize - bytes,
+			              "{\"model\":\"%c\",\"modelName\":\"WoHand\",\"mode\":"
+			              "%s,\"battery\":%i,\"state\":%i}}",
+			              Device.model, ( Device.bot.mode ? "true" : "false" ),
+			              Device.bot.battery, Device.bot.state );
 
-				break;
-			}
+			break;
+		}
 
-			case TH_I_DATA_ID:
-			case TH_T_DATA_ID:
+		case TH_I_DATA_ID:
+		case TH_T_DATA_ID: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":\"WoSensorTH\","
+			                   "\"temperature\":{\"c\": "
+			                   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
+			                   Device.model, Device.thermometer.temperature,
+			                   Device.thermometer.battery,
+			                   Device.thermometer.humidity );
+
+			break;
+		}
+
+		case PRESENCE_DATA_ID: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":\"WoPresence\","
+			                   "\"motion\":%i,\"battery\":%i,\"light\":%i}}",
+			                   Device.model, Device.Presence.motion,
+			                   Device.Presence.battery, Device.Presence.light );
+
+			break;
+		}
+
+		case CONTACT_DATA_ID: {
+			bytes += snprintf(
+			    Buf + bytes, BufSize - bytes,
+			    "{\"model\":\"%c\",\"modelName\":\"WoContact\",\"motion\":%i,"
+			    "\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,"
+			    "\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i,"
+			    "\"entryCount\":%i,\"exitCount\":%i}}",
+			    Device.model, Device.Contact.motion, Device.Contact.battery,
+			    Device.Contact.light, Device.Contact.contact,
+			    Device.Contact.leftOpen, Device.Contact.lastMotion,
+			    Device.Contact.lastContact, Device.Contact.buttonPresses,
+			    Device.Contact.entryCount, Device.Contact.exitCount );
+
+			break;
+		}
+
+		case REMOTE_DATA_ID: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":\"WoRemote\","
+			                   "\"data1\":%i,\"data2\":%i,\"data3\":%i}}",
+			                   Device.model, Device.Remote.data1,
+			                   Device.Remote.data2, Device.Remote.data3 );
+
+			break;
+		}
+
+		case BULB_DATA_ID: {
+			bytes += snprintf(
+			    Buf + bytes, BufSize - bytes,
+			    "{\"model\":\"%c\",\"modelName\":\"WoBulb\",\"sequence\":%i,"
+			    "\"on_off\":%i,\"dim\":%i,\"lightState\":%i}}",
+			    Device.model, Device.Bulb.sequence, Device.Bulb.on_off,
+			    Device.Bulb.dim, Device.Bulb.lightState );
+
+			break;
+		}
+
+		case IOTH_DATA_ID:
+		case IOTH_DATA_ID2: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":\"WoIOSensor\","
+			                   "\"temperature\":{\"c\": "
+			                   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
+			                   Device.model, Device.thermometer.temperature,
+			                   Device.thermometer.battery,
+			                   Device.thermometer.humidity );
+
+			break;
+		}
+
+		case WATERLEAK_DATA_ID: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":"
+			                   "\"WoWaterLeak\",\"battery\":%i,\"status\":%i}}",
+			                   Device.model, Device.WaterLeak.battery,
+			                   Device.WaterLeak.status );
+
+			break;
+		}
+
+		case PLUG_DATA_ID: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":\"Plug\","
+			                   "\"state\":%s,\"wifiRSSI\":%i,\"overload\":%s,\"power\":%i}}",
+			                   Device.model,
+			                   ( Device.Plug.state ? "true" : "false" ),
+			                   Device.Plug.wifiRSSI,
+			                   ( Device.Plug.overload ? "true" : "false" ),
+			                   Device.Plug.power );
+
+			break;
+		}
+
+		case METERPRO_DATA_ID: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":\"MeterPro\","
+			                   "\"temperature\":{\"c\": "
+			                   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
+			                   Device.model, Device.thermometer.temperature,
+			                   Device.thermometer.battery,
+			                   Device.thermometer.humidity );
+
+			break;
+		}
+
+		case METERPROCO2_DATA_ID: {
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"model\":\"%c\",\"modelName\":\"MeterPro(CO2)\","
+			                   "\"temperature\":{\"c\": "
+			                   "%0.1f},\"battery\":%i,\"humidity\":%i, \"co2\":%i}}",
+			                   Device.model, Device.MeterProCO2.temperature,
+			                   Device.MeterProCO2.battery,
+			                   Device.MeterProCO2.humidity,
+			                   Device.MeterProCO2.co2 );
+
+			break;
+		}
+
+		case USE_LONG_DATA_ID: {
+			if ( ( ( PRESENCE2_DATA_LONG_ID1[ 0 ] == Device.modelTriByte[ 0 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 1 ] == Device.modelTriByte[ 2 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 2 ] == Device.modelTriByte[ 2 ] ) ) ||
+			     ( ( PRESENCE2_DATA_LONG_ID2[ 0 ] == Device.modelTriByte[ 0 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 1 ] == Device.modelTriByte[ 1 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 2 ] == Device.modelTriByte[ 2 ] ) ) )
 			{
 				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":\"WoSensorTH\","
-								   "\"temperature\":{\"c\": "
-								   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
-								   Device.model, Device.thermometer.temperature,
-								   Device.thermometer.battery,
-								   Device.thermometer.humidity );
-
-				break;
+				                   "{\"model\":\"Presence\",\"modelName\":\"Presence(mm)\","
+				                   "\"presence\":%i,\"battery\":%i,\"light\":%i}}",
+				                   Device.Presence.motion,
+				                   Device.Presence.battery, Device.Presence.light );
 			}
-
-			case PRESENCE_DATA_ID:
+			else
 			{
 				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":\"WoPresence\","
-								   "\"motion\":%i,\"battery\":%i,\"light\":%i}}",
-								   Device.model, Device.Presence.motion,
-								   Device.Presence.battery, Device.Presence.light );
-
-				break;
+				                   "{\"error\": \"Unknown model %X, %X, %X\"}}", Device.modelTriByte[ 0 ], Device.modelTriByte[ 1 ], Device.modelTriByte[ 2 ] );
 			}
+			break;
+		}
 
-			case CONTACT_DATA_ID:
-			{
-				bytes += snprintf(
-					Buf + bytes, BufSize - bytes,
-					"{\"model\":\"%c\",\"modelName\":\"WoContact\",\"motion\":%i,"
-					"\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,"
-					"\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i,"
-					"\"entryCount\":%i,\"exitCount\":%i}}",
-					Device.model, Device.Contact.motion, Device.Contact.battery,
-					Device.Contact.light, Device.Contact.contact,
-					Device.Contact.leftOpen, Device.Contact.lastMotion,
-					Device.Contact.lastContact, Device.Contact.buttonPresses,
-					Device.Contact.entryCount, Device.Contact.exitCount );
-
-				break;
-			}
-
-			case REMOTE_DATA_ID:
-			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":\"WoRemote\","
-								   "\"data1\":%i,\"data2\":%i,\"data3\":%i}}",
-								   Device.model, Device.Remote.data1,
-								   Device.Remote.data2, Device.Remote.data3 );
-
-				break;
-			}
-
-			case BULB_DATA_ID:
-			{
-				bytes += snprintf(
-					Buf + bytes, BufSize - bytes,
-					"{\"model\":\"%c\",\"modelName\":\"WoBulb\",\"sequence\":%i,"
-					"\"on_off\":%i,\"dim\":%i,\"lightState\":%i}}",
-					Device.model, Device.Bulb.sequence, Device.Bulb.on_off,
-					Device.Bulb.dim, Device.Bulb.lightState );
-
-				break;
-			}
-
-			case IOTH_DATA_ID:
-			case IOTH_DATA_ID2:
-			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":\"WoIOSensor\","
-								   "\"temperature\":{\"c\": "
-								   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
-								   Device.model, Device.thermometer.temperature,
-								   Device.thermometer.battery,
-								   Device.thermometer.humidity );
-
-				break;
-			}
-
-			case WATERLEAK_DATA_ID:
-			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":"
-								   "\"WoWaterLeak\",\"battery\":%i,\"status\":%i}}",
-								   Device.model, Device.WaterLeak.battery,
-								   Device.WaterLeak.status );
-
-				break;
-			}
-
-			case PLUG_DATA_ID:
-			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":\"Plug\","
-								   "\"state\":%s,\"wifiRSSI\":%i,\"overload\":%s,\"power\":%i}}",
-								   Device.model,
-								   ( Device.Plug.state ? "true" : "false" ),
-								   Device.Plug.wifiRSSI,
-								   ( Device.Plug.overload ? "true" : "false" ),
-								   Device.Plug.power );
-
-				break;
-			}
-
-			case METERPRO_DATA_ID:
-			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":\"MeterPro\","
-								   "\"temperature\":{\"c\": "
-								   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
-								   Device.model, Device.thermometer.temperature,
-								   Device.thermometer.battery,
-								   Device.thermometer.humidity );
-
-				break;
-			}
-
-			case METERPROCO2_DATA_ID:
-			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"model\":\"%c\",\"modelName\":\"MeterPro(CO2)\","
-								   "\"temperature\":{\"c\": "
-								   "%0.1f},\"battery\":%i,\"humidity\":%i, \"co2\":%i}}",
-								   Device.model, Device.MeterProCO2.temperature,
-								   Device.MeterProCO2.battery,
-								   Device.MeterProCO2.humidity,
-                   Device.MeterProCO2.co2 );
-
-				break;
-			}
-
-			case USE_LONG_DATA_ID:
-			{
-				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == Device.modelTriByte[ 0 ]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == Device.modelTriByte[ 2 ]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == Device.modelTriByte[ 2 ])) ||
-					((PRESENCE2_DATA_LONG_ID2[ 0 ] == Device.modelTriByte[ 0 ]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == Device.modelTriByte[ 1 ]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == Device.modelTriByte[ 2 ])))
-				{
-					bytes += snprintf( Buf + bytes, BufSize - bytes,
-										"{\"model\":\"Presence\",\"modelName\":\"Presence(mm)\","
-										"\"presence\":%i,\"battery\":%i,\"light\":%i}}",
-										Device.Presence.motion,
-										Device.Presence.battery, Device.Presence.light );
-				}
-				else
-				{
-					bytes += snprintf( Buf + bytes, BufSize - bytes,
-										"{\"error\": \"Unknown model %X, %X, %X\"}}", Device.modelTriByte[0], Device.modelTriByte[1], Device.modelTriByte[2] );
-				}
-				break;
-			}
-
-			default:
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-								   "{\"error\": \"Unknown model %c\"}}", Device.model );
+		default:
+			bytes += snprintf( Buf + bytes, BufSize - bytes,
+			                   "{\"error\": \"Unknown model %c\"}}", Device.model );
 		}
 
 		return bytes;
 	}
 
 	return snprintf(
-		Buf, BufSize,
-		"{\"hubMAC\":\"%s\",\"serviceData\":{\"error\": \"Invalid index %i\"}}",
-		macAddress, Index );
+	    Buf, BufSize,
+	    "{\"hubMAC\":\"%s\",\"serviceData\":{\"error\": \"Invalid index %i\"}}",
+	    macAddress, Index );
 }
 
 int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged,
-						   char* macAddress )
+                           char* macAddress )
 {
 	static boolean inAllToJson = false;
 
@@ -1077,7 +1039,7 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged,
 	}
 
 	int totaleBytes = 1;
-	*Buf			= '[';
+	*Buf = '[';
 	for ( uint8_t i = 0; i < NumDevices; i++ )
 	{
 		// Leave at least 256 bytes for the next device plus closing bracket/null
@@ -1097,7 +1059,7 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged,
 		}
 
 		int bytes = DeviceToJson( i, Buf + totaleBytes, BufSize - totaleBytes,
-								  macAddress );
+		                          macAddress );
 		if ( bytes > 0 )
 		{
 			totaleBytes += bytes;
@@ -1115,7 +1077,7 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged,
 
 	totaleBytes--;
 	Buf[ totaleBytes++ ] = ']';
-	Buf[ totaleBytes ]	 = 0;
+	Buf[ totaleBytes ] = 0;
 
 	// Serial.println( Buf );
 
@@ -1153,86 +1115,72 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 	switch ( Device.Data[ 0 ] )
 	{
-		case TH_I_DATA_ID:
-		case TH_T_DATA_ID:
-		{
-			return parseThermometer( Device, SW_Device );
-		}
+	case TH_I_DATA_ID:
+	case TH_T_DATA_ID: {
+		return parseThermometer( Device, SW_Device );
+	}
 
-		case BOT_DATA_ID:
-		{
-			return parseBot( Device, SW_Device );
-		}
+	case BOT_DATA_ID: {
+		return parseBot( Device, SW_Device );
+	}
 
-		case CURTAIN_DATA_ID:
-		case CURTAIN3_DATA_ID:
-		case ROLLERBLIND_DATA_ID:
-		case ROLLERBLIND2_DATA_ID:
-		{
-			return parseCurtain( Device, SW_Device );
-		}
+	case CURTAIN_DATA_ID:
+	case CURTAIN3_DATA_ID:
+	case ROLLERBLIND_DATA_ID:
+	case ROLLERBLIND2_DATA_ID: {
+		return parseCurtain( Device, SW_Device );
+	}
 
-		case PRESENCE_DATA_ID:
-		{
-			return parsePresence( Device, SW_Device );
-		}
+	case PRESENCE_DATA_ID: {
+		return parsePresence( Device, SW_Device );
+	}
 
-		case CONTACT_DATA_ID:
-		{
-			return parseContac( Device, SW_Device );
-		}
+	case CONTACT_DATA_ID: {
+		return parseContac( Device, SW_Device );
+	}
 
-		case REMOTE_DATA_ID:
-		{
-			return parseRemote( Device, SW_Device );
-		}
+	case REMOTE_DATA_ID: {
+		return parseRemote( Device, SW_Device );
+	}
 
-		case BULB_DATA_ID:
-		{
-			return parseBulb( Device, SW_Device );
-		}
+	case BULB_DATA_ID: {
+		return parseBulb( Device, SW_Device );
+	}
 
-		case IOTH_DATA_ID:
-		case IOTH_DATA_ID2:
-		{
-			return parseIOTH( Device, SW_Device );
-		}
+	case IOTH_DATA_ID:
+	case IOTH_DATA_ID2: {
+		return parseIOTH( Device, SW_Device );
+	}
 
-		case BLIND_DATA_ID:
-		{
-			return parseBlind( Device, SW_Device );
-		}
+	case BLIND_DATA_ID: {
+		return parseBlind( Device, SW_Device );
+	}
 
-		case WATERLEAK_DATA_ID:
-		{
-			return parseWaterLeak( Device, SW_Device );
-		}
+	case WATERLEAK_DATA_ID: {
+		return parseWaterLeak( Device, SW_Device );
+	}
 
-		case PLUG_DATA_ID:
-		{
-			return parsePlug( Device, SW_Device );
-		}
+	case PLUG_DATA_ID: {
+		return parsePlug( Device, SW_Device );
+	}
 
-		case METERPRO_DATA_ID:
-		{
-			return parseMeterPro( Device, SW_Device );
-		}
+	case METERPRO_DATA_ID: {
+		return parseMeterPro( Device, SW_Device );
+	}
 
-		case METERPROCO2_DATA_ID:
-		{
-			return parseMeterProCO2( Device, SW_Device );
-		}
+	case METERPROCO2_DATA_ID: {
+		return parseMeterProCO2( Device, SW_Device );
+	}
 
-		case USE_LONG_DATA_ID:
+	case USE_LONG_DATA_ID: {
+		if ( ( ( PRESENCE2_DATA_LONG_ID1[ 0 ] == Device.Data[ 1 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 1 ] == Device.Data[ 2 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 2 ] == Device.Data[ 3 ] ) ) ||
+		     ( ( PRESENCE2_DATA_LONG_ID2[ 0 ] == Device.Data[ 1 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 1 ] == Device.Data[ 2 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 2 ] == Device.Data[ 3 ] ) ) )
 		{
-				if (((PRESENCE2_DATA_LONG_ID1[ 0 ] == Device.Data[1]) && (PRESENCE2_DATA_LONG_ID1[ 1 ] == Device.Data[ 2 ]) && (PRESENCE2_DATA_LONG_ID1[ 2 ] == Device.Data[ 3 ])) ||
-					((PRESENCE2_DATA_LONG_ID2[ 0 ] == Device.Data[ 1 ]) && (PRESENCE2_DATA_LONG_ID2[ 1 ] == Device.Data[ 2 ]) && (PRESENCE2_DATA_LONG_ID2[ 2 ] == Device.Data[ 3 ])))
-				{
-					return parsePresence2( Device, SW_Device );
-				}
-				Serial.printf( "Failed to parse device: Unrecognised device tri-type: %X, %X, %X\n", Device.Data[1], Device.Data[2], Device.Data[3]);
-				return false;
+			return parsePresence2( Device, SW_Device );
 		}
+		Serial.printf( "Failed to parse device: Unrecognised device tri-type: %X, %X, %X\n", Device.Data[ 1 ], Device.Data[ 2 ], Device.Data[ 3 ] );
+		return false;
+	}
 	}
 
 	Serial.printf( "Failed to parse device: Unrecognised device type: %X", Device.Data[ 0 ] );
@@ -1250,11 +1198,11 @@ bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	uint8_t byte2 = Device.Data[ 2 ];
 
 	SW_Device.bot.mode =
-		( ( byte1 & 0b10000000 ) !=
-		  0 );	  // Whether the light switch Add-on is used or not
-	SW_Device.bot.state	  = ( ( byte1 & 0b01000000 ) !=
-							  0 );				   // Whether the switch status is ON or OFF
-	SW_Device.bot.battery = byte2 & 0b01111111;	   // %
+	    ( ( byte1 & 0b10000000 ) !=
+	      0 ); // Whether the light switch Add-on is used or not
+	SW_Device.bot.state = ( ( byte1 & 0b01000000 ) !=
+	                        0 );                // Whether the switch status is ON or OFF
+	SW_Device.bot.battery = byte2 & 0b01111111; // %
 
 	// Serial.printf( "Bot: MAC = %s, state = %i, battery = %i\n", Device.MAC,
 	// SW_Device.bot.state, SW_Device.bot.battery );
@@ -1283,7 +1231,7 @@ bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	}
 
 	if ( ( Device.DataSize < CURTAIN_DATA_SIZE ) &&
-		 ( Device.DataSize < CURTAIN3_DATA_SIZE ) )
+	     ( Device.DataSize < CURTAIN3_DATA_SIZE ) )
 	{
 		return false;
 	}
@@ -1294,14 +1242,14 @@ bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	uint8_t byte4 = Device.Data[ 4 ];
 
 	SW_Device.curtain.calibration =
-		( ( byte1 & 0b01000000 ) !=
-		  0 );											   // Whether the calibration is completed
-	SW_Device.curtain.battery = ( byte2 & 0b01111111 );	   // %
+	    ( ( byte1 & 0b01000000 ) !=
+	      0 );                                          // Whether the calibration is completed
+	SW_Device.curtain.battery = ( byte2 & 0b01111111 ); // %
 	SW_Device.curtain.position =
-		( byte3 & 0b01111111 );	   // current position %
+	    ( byte3 & 0b01111111 ); // current position %
 	SW_Device.curtain.moving = ( byte3 & 0b10000000 ) != 0 ? true : false;
 	SW_Device.curtain.lightLevel =
-		( byte4 >> 4 ) & 0b00001111;	// light sensor level (1-10)
+	    ( byte4 >> 4 ) & 0b00001111; // light sensor level (1-10)
 
 	// Serial.printf( "Curtain: MAC = %s, position = %i, battery = %i\n",
 	// Device.MAC, SW_Device.curtain.position, SW_Device.curtain.battery );
@@ -1312,28 +1260,28 @@ bool BLE_Device::parseCurtain( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 bool BLE_Device::parseBlind( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 {
 	if ( ( Device.DataSize != BLIND_DATASIZE ) &&
-		 ( Device.DataSize != BLIND_DATASIZE2 ) )
+	     ( Device.DataSize != BLIND_DATASIZE2 ) )
 	{
 		Serial.printf( "Failed to parse Blind: MAC = %s, data size = %i\n",
-					   Device.MAC, Device.DataSize );
+		               Device.MAC, Device.DataSize );
 		return false;
 	}
 
-	uint8_t byte2			= Device.Data[ 2 ];
-	SW_Device.blind.battery = ( byte2 & 0b01111111 );	 // %
+	uint8_t byte2 = Device.Data[ 2 ];
+	SW_Device.blind.battery = ( byte2 & 0b01111111 ); // %
 
 	if ( Device.DataSize == BLIND_DATASIZE2 )
 	{
 		uint8_t byte11 = Device.Data[ 11 ];
 		SW_Device.blind.position =
-			( byte11 & 0b01111111 );	// current position %
+		    ( byte11 & 0b01111111 ); // current position %
 		SW_Device.blind.version = 2;
 	}
 	else
 	{
 		uint8_t byte11 = Device.Data[ 9 ];
 		SW_Device.blind.position =
-			( byte11 & 0b01111111 );	// current position %
+		    ( byte11 & 0b01111111 ); // current position %
 		SW_Device.blind.version = 2;
 	}
 	// Serial.printf( "Blind: MAC = %s, battery = %i\n", Device.MAC,
@@ -1349,22 +1297,22 @@ bool BLE_Device::parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		return false;
 	}
 
-	uint8_t byte2  = Device.Data[ 2 ];
+	uint8_t byte2 = Device.Data[ 2 ];
 	uint8_t byte10 = Device.Data[ 11 ];
 	uint8_t byte11 = Device.Data[ 12 ];
 	uint8_t byte12 = Device.Data[ 13 ];
 
 	float temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
 	SW_Device.thermometer.temperature =
-		temp_sign * ( ( float ) ( byte11 & 0b01111111 ) +
-					  ( ( float ) ( byte10 & 0b01111111 ) / 10 ) );
+	    temp_sign * ( ( float )( byte11 & 0b01111111 ) +
+	                  ( ( float )( byte10 & 0b01111111 ) / 10 ) );
 
 	//    Serial.printf("W temp = %f, %f, %f, %f\n", temp_sign, (float)(byte11 &
 	//    0b01111111), ((float)(byte10 & 0b01111111) / 10),
 	//    SW_Device.thermometer.temperature);
 
 	SW_Device.thermometer.humidity = ( byte12 & 0b01111111 );
-	SW_Device.thermometer.battery  = ( byte2 & 0b01111111 );
+	SW_Device.thermometer.battery = ( byte2 & 0b01111111 );
 
 	// Serial.printf( "Thermometer: MAC = %s, temperature = %0.1f, humidity =
 	// %i, battery = %i\n", Device.MAC, SW_Device.thermometer.temperature,
@@ -1387,10 +1335,10 @@ bool BLE_Device::parseThermometer( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 	uint8_t temp_sign = ( byte4 & 0b10000000 ) ? 1 : -1;
 	SW_Device.thermometer.temperature =
-		temp_sign * ( ( byte4 & 0b01111111 ) + ( ( float ) byte3 / 10 ) );
+	    temp_sign * ( ( byte4 & 0b01111111 ) + ( ( float )byte3 / 10 ) );
 
 	SW_Device.thermometer.humidity = ( byte5 & 0b01111111 );
-	SW_Device.thermometer.battery  = ( byte2 & 0b01111111 );
+	SW_Device.thermometer.battery = ( byte2 & 0b01111111 );
 
 	// Serial.printf( "Thermometer: MAC = %s, temperature = %0.1f, humidity =
 	// %i, battery = %i\n", Device.MAC, SW_Device.thermometer.temperature,
@@ -1412,8 +1360,8 @@ bool BLE_Device::parsePresence( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	uint8_t byte4 = Device.Data[ 4 ];
 	uint8_t byte5 = Device.Data[ 5 ];
 
-	SW_Device.Presence.light   = ( ( byte5 & 0b00000011 ) == 2 );
-	SW_Device.Presence.motion  = ( ( byte1 & 0b01000000 ) == 0b01000000 );
+	SW_Device.Presence.light = ( ( byte5 & 0b00000011 ) == 2 );
+	SW_Device.Presence.motion = ( ( byte1 & 0b01000000 ) == 0b01000000 );
 	SW_Device.Presence.battery = ( byte2 & 0b01111111 );
 
 	// Serial.printf( "Presence: MAC = %s, motion = %i, light = %i, battery =
@@ -1436,9 +1384,9 @@ bool BLE_Device::parsePresence2( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	uint8_t byte7 = Device.Data[ 7 + 4 + 2 ];
 	uint8_t byte11 = Device.Data[ 11 + 4 + 2 ];
 
-	SW_Device.Presence.light   = ( byte11 & 0x1F );
-	SW_Device.Presence.motion  = ( ( byte7 & 0x40 ) != 0 );
-	SW_Device.Presence.battery = ( (byte7 >> 2) & 0x03 );
+	SW_Device.Presence.light = ( byte11 & 0x1F );
+	SW_Device.Presence.motion = ( ( byte7 & 0x40 ) != 0 );
+	SW_Device.Presence.battery = ( ( byte7 >> 2 ) & 0x03 );
 
 	// Serial.printf( "Presence: MAC = %s, motion = %i, light = %i, battery =
 	// %i\n", Device.MAC, SW_Device.Presence.motion, SW_Device.Presence.light,
@@ -1463,21 +1411,21 @@ bool BLE_Device::parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 	uint8_t byte7 = Device.Data[ 7 ];
 	uint8_t byte8 = Device.Data[ 8 ];
 
-	SW_Device.Contact.motion	  = ( ( byte1 & 0b01000000 ) == 0b01000000 );
-	SW_Device.Contact.battery	  = ( byte2 & 0b01111111 );
-	SW_Device.Contact.light		  = ( byte3 & 0b00000001 ) == 0b00000001;
-	SW_Device.Contact.contact	  = ( ( byte3 & 0b00000110 ) != 0 );
-	SW_Device.Contact.leftOpen	  = ( ( byte3 & 0b00000100 ) != 0 );
-	SW_Device.Contact.lastMotion  = ( byte4 * 256 ) + byte5;
+	SW_Device.Contact.motion = ( ( byte1 & 0b01000000 ) == 0b01000000 );
+	SW_Device.Contact.battery = ( byte2 & 0b01111111 );
+	SW_Device.Contact.light = ( byte3 & 0b00000001 ) == 0b00000001;
+	SW_Device.Contact.contact = ( ( byte3 & 0b00000110 ) != 0 );
+	SW_Device.Contact.leftOpen = ( ( byte3 & 0b00000100 ) != 0 );
+	SW_Device.Contact.lastMotion = ( byte4 * 256 ) + byte5;
 	SW_Device.Contact.lastContact = ( byte6 * 256 ) + byte7;
 	SW_Device.Contact.buttonPresses =
-		( byte8 & 0b00001111 );	   // Increments every time button is pressed
+	    ( byte8 & 0b00001111 ); // Increments every time button is pressed
 	SW_Device.Contact.entryCount =
-		( ( byte8 >> 6 ) &
-		  0b00000011 );	   // Increments every time someone enters
+	    ( ( byte8 >> 6 ) &
+	      0b00000011 ); // Increments every time someone enters
 	SW_Device.Contact.exitCount =
-		( ( byte8 >> 4 ) &
-		  0b00000011 );	   // Increments every time someone exits
+	    ( ( byte8 >> 4 ) &
+	      0b00000011 ); // Increments every time someone exits
 
 	// Serial.printf( "Contact: MAC = %s, contact = %i, motion = %i, light = %i,
 	// left open = %i, button presses = %i, entry count = %i, exit count = %i,
@@ -1518,13 +1466,13 @@ bool BLE_Device::parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		return false;
 	}
 
-	uint8_t byte8  = Device.Data[ 9 ];
-	uint8_t byte9  = Device.Data[ 10 ];
+	uint8_t byte8 = Device.Data[ 9 ];
+	uint8_t byte9 = Device.Data[ 10 ];
 	uint8_t byte10 = Device.Data[ 11 ];
 
-	SW_Device.Bulb.sequence	  = byte8;
-	SW_Device.Bulb.on_off	  = ( ( byte9 & 0x80 ) == 0x80 );
-	SW_Device.Bulb.dim		  = ( byte9 & 0x7F );
+	SW_Device.Bulb.sequence = byte8;
+	SW_Device.Bulb.on_off = ( ( byte9 & 0x80 ) == 0x80 );
+	SW_Device.Bulb.dim = ( byte9 & 0x7F );
 	SW_Device.Bulb.lightState = ( byte10 & 0x03 );
 
 	// Serial.printf( "Bulb: MAC = %s, Sequence = %i, On_Off = %i, Dim = %i,
@@ -1541,11 +1489,11 @@ bool BLE_Device::parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		return false;
 	}
 
-	uint8_t byte2  = Device.Data[ 2 ];
+	uint8_t byte2 = Device.Data[ 2 ];
 	uint8_t byte10 = Device.Data[ 11 ];
 
 	SW_Device.WaterLeak.status = ( byte10 & 0x01 );
-	SW_Device.WaterLeak.battery  = ( byte2 & 0b01111111 );
+	SW_Device.WaterLeak.battery = ( byte2 & 0b01111111 );
 
 	// Serial.printf( "Water Leak: MAC = %s, StatUS = %i\n", Device.MAC,
 	// SW_Device.WaterLeak.Status );
@@ -1579,22 +1527,22 @@ bool BLE_Device::parseMeterPro( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		return false;
 	}
 
-	uint8_t byte2  = Device.Data[ 2 ];
+	uint8_t byte2 = Device.Data[ 2 ];
 	uint8_t byte10 = Device.Data[ 11 ];
 	uint8_t byte11 = Device.Data[ 12 ];
 	uint8_t byte12 = Device.Data[ 13 ];
 
 	float temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
 	SW_Device.thermometer.temperature =
-		temp_sign * ( ( float ) ( byte11 & 0b01111111 ) +
-					  ( ( float ) ( byte10 & 0b01111111 ) / 10 ) );
+	    temp_sign * ( ( float )( byte11 & 0b01111111 ) +
+	                  ( ( float )( byte10 & 0b01111111 ) / 10 ) );
 
 	//    Serial.printf("W temp = %f, %f, %f, %f\n", temp_sign, (float)(byte11 &
 	//    0b01111111), ((float)(byte10 & 0b01111111) / 10),
 	//    SW_Device.thermometer.temperature);
 
 	SW_Device.thermometer.humidity = ( byte12 & 0b01111111 );
-	SW_Device.thermometer.battery  = ( byte2 & 0b01111111 );
+	SW_Device.thermometer.battery = ( byte2 & 0b01111111 );
 
 	// Serial.printf( "Thermometer: MAC = %s, temperature = %0.1f, humidity =
 	// %i, battery = %i\n", Device.MAC, SW_Device.thermometer.temperature,
@@ -1610,7 +1558,7 @@ bool BLE_Device::parseMeterProCO2( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		return false;
 	}
 
-	uint8_t byte2  = Device.Data[ 2 ];
+	uint8_t byte2 = Device.Data[ 2 ];
 	uint8_t byte10 = Device.Data[ 11 ];
 	uint8_t byte11 = Device.Data[ 12 ];
 	uint8_t byte12 = Device.Data[ 13 ];
@@ -1619,16 +1567,16 @@ bool BLE_Device::parseMeterProCO2( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 	float temp_sign = ( byte11 & 0b10000000 ) ? 1 : -1;
 	SW_Device.MeterProCO2.temperature =
-		temp_sign * ( ( float ) ( byte11 & 0b01111111 ) +
-					  ( ( float ) ( byte10 & 0b01111111 ) / 10 ) );
+	    temp_sign * ( ( float )( byte11 & 0b01111111 ) +
+	                  ( ( float )( byte10 & 0b01111111 ) / 10 ) );
 
 	//    Serial.printf("W temp = %f, %f, %f, %f\n", temp_sign, (float)(byte11 &
 	//    0b01111111), ((float)(byte10 & 0b01111111) / 10),
 	//    SW_Device.MeterProCO2.temperature);
 
 	SW_Device.MeterProCO2.humidity = ( byte12 & 0b01111111 );
-	SW_Device.MeterProCO2.battery  = ( byte2 & 0b01111111 );
-  SW_Device.MeterProCO2.co2 = (byte15 * 256) + byte16;
+	SW_Device.MeterProCO2.battery = ( byte2 & 0b01111111 );
+	SW_Device.MeterProCO2.co2 = ( byte15 * 256 ) + byte16;
 
 	// Serial.printf( "MeterProCO2: MAC = %s, temperature = %0.1f, humidity =
 	// %i, battery = %i\n", Device.MAC, SW_Device.MeterProCO2.temperature,
@@ -1665,7 +1613,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
 		if ( strcmp( Callbacks[ i ].url, url ) == 0 )
 		{
 			Callbacks[ i ].activatedTime = t;
-			Callbacks[ i ].refusals		 = 0;
+			Callbacks[ i ].refusals = 0;
 			// Serial.println( "Request OK, URI is already registered." );
 			return true;
 		}
@@ -1678,7 +1626,7 @@ bool ClientCallbacks::Add( const char* url, unsigned long t )
 	}
 
 	Callbacks[ NumCallbacks ].activatedTime = t;
-	Callbacks[ NumCallbacks ].refusals		= 0;
+	Callbacks[ NumCallbacks ].refusals = 0;
 	strncpy( Callbacks[ NumCallbacks ].url, url, sizeof( Callbacks[ NumCallbacks ].url ) - 1 );
 	Callbacks[ NumCallbacks ].url[ sizeof( Callbacks[ NumCallbacks ].url ) - 1 ] = 0;
 	NumCallbacks++;
@@ -1730,14 +1678,14 @@ bool ClientCallbacks::Get( uint8_t Index, char* buf, int BufLength )
 
 bool ClientCallbacks::Remove( uint8_t Index )
 {
-  if (Callbacks[ Index ].refusals > 10)
-  {
-    Serial.printf( "Removing client %s as too many contiguous refusals\n", Callbacks[ Index ].url );
-  }
-  else
-  {
-    Serial.printf( "Removing expired client %s\n", Callbacks[ Index ].url );
-  }
+	if ( Callbacks[ Index ].refusals > 10 )
+	{
+		Serial.printf( "Removing client %s as too many contiguous refusals\n", Callbacks[ Index ].url );
+	}
+	else
+	{
+		Serial.printf( "Removing expired client %s\n", Callbacks[ Index ].url );
+	}
 
 	for ( int8_t x = Index; x < NumCallbacks - 1; x++ )
 	{
@@ -1804,9 +1752,9 @@ bool ClientCallbacks::HasCallbacks()
 
 CommandQ::CommandQ()
 {
-	NumQd  = 0;
+	NumQd = 0;
 	QEntry = 0;
-	QExit  = 0;
+	QExit = 0;
 }
 
 CommandQ::~CommandQ()
@@ -1856,7 +1804,7 @@ bool CommandQ::Find( const char* Address, const uint8_t* Data, uint8_t DataLen )
 bool CommandQ::Push( const char* Address, const uint8_t* Data, uint8_t DataLen, const char* ReplyTo )
 {
 	if ( ( Address == nullptr ) || ( Data == nullptr ) || ( ReplyTo == nullptr ) ||
-		 ( DataLen == 0 ) || ( DataLen > sizeof( BLE_COMMAND::Data ) ) )
+	     ( DataLen == 0 ) || ( DataLen > sizeof( BLE_COMMAND::Data ) ) )
 	{
 		return false;
 	}

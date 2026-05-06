@@ -36,6 +36,25 @@
 
 const char* version = "Hello! SwitchBot BLE Hub V2.14";
 
+// Extract JSON string field into a fixed char buffer (no String allocation)
+static bool TryGetJsonStringFieldIntoBuf( const uint8_t* data, size_t len, const char* key, char* outBuf, size_t maxLen )
+{
+	if ( !outBuf || maxLen < 2 )
+		return false;
+	outBuf[ 0 ] = '\0';
+
+	String temp;
+	if ( !TryGetJsonStringField( data, len, key, temp ) )
+		return false;
+
+	if ( temp.length() == 0 )
+		return false;
+
+	strncpy( outBuf, temp.c_str(), maxLen - 1 );
+	outBuf[ maxLen - 1 ] = '\0';
+	return true;
+}
+
 static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* key, String& value )
 {
 	value = "";
@@ -92,14 +111,17 @@ static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* 
 
 static bool ParseNumericByteToken( const String& rawToken, uint8_t& outByte )
 {
-	String token = rawToken;
-	token.trim();
-	if ( token.length() == 0 )
+	// Use const char* instead of String token to avoid allocation
+	const char* token = rawToken.c_str();
+	// Trim whitespace from the start
+	while ( *token == ' ' || *token == '\t' || *token == '\r' || *token == '\n' )
+		token++;
+	if ( *token == '\0' )
 	{
 		return false;
 	}
 
-	const char* start = token.c_str();
+const char* start = token;
 	char* end = nullptr;
 	double number = strtod( start, &end );
 	if ( end == start )
@@ -271,28 +293,26 @@ static bool ParseByteListString( const String& value, uint8_t* outData, uint8_t 
 		return false;
 	}
 
-	String list = value;
-	list.trim();
-	if ( list.length() < 3 || list[ 0 ] != '[' || list[ list.length() - 1 ] != ']' )
+	if ( value.length() < 3 || value[ 0 ] != '[' || value[ value.length() - 1 ] != ']' )
 	{
 		return false;
 	}
 
 	int pos = 1;
-	while ( pos < list.length() - 1 )
+	while ( pos < value.length() - 1 )
 	{
-		while ( pos < list.length() - 1 && ( list[ pos ] == ' ' || list[ pos ] == '\t' || list[ pos ] == ',' ) )
+		while ( pos < value.length() - 1 && ( value[ pos ] == ' ' || value[ pos ] == '\t' || value[ pos ] == ',' ) )
 		{
 			pos++;
 		}
 
-		if ( pos >= list.length() - 1 )
+		if ( pos >= value.length() - 1 )
 		{
 			break;
 		}
 
 		int start = pos;
-		while ( pos < list.length() - 1 && list[ pos ] != ',' && list[ pos ] != ']' )
+		while ( pos < value.length() - 1 && value[ pos ] != ',' && value[ pos ] != ']' )
 		{
 			pos++;
 		}
@@ -308,7 +328,7 @@ static bool ParseByteListString( const String& value, uint8_t* outData, uint8_t 
 		}
 
 		uint8_t byteValue = 0;
-		if ( !ParseNumericByteToken( list.substring( start, pos ), byteValue ) )
+		if ( !ParseNumericByteToken( value.substring( start, pos ), byteValue ) )
 		{
 			return false;
 		}
@@ -1835,58 +1855,12 @@ static void ExtractIpFromUri( const char* uri, char* outIp, int outSize )
 	outIp[ i ] = 0;
 }
 
-static String JsonEscape( const char* s )
-{
-	if ( s == nullptr )
-	{
-		return "";
-	}
-
-	String out;
-	out.reserve( strlen( s ) + 8 );
-	for ( const char* p = s; *p != 0; p++ )
-	{
-		const uint8_t ch = ( uint8_t )*p;
-		switch ( ch )
-		{
-			case '\\':
-				out += "\\\\";
-				break;
-			case '"':
-				out += "\\\"";
-				break;
-			case '\n':
-				out += "\\n";
-				break;
-			case '\r':
-				out += "\\r";
-				break;
-			case '\t':
-				out += "\\t";
-				break;
-			default:
-				if ( ch < 0x20 )
-				{
-					char esc[ 7 ];
-					snprintf( esc, sizeof( esc ), "\\u%04X", ( unsigned int )ch );
-					out += esc;
-				}
-				else
-				{
-					out += ( char )ch;
-				}
-				break;
-		}
-	}
-
-	return out;
-}
-
 // Write JSON-escaped string (no surrounding quotes) directly into dst buffer.
 // Returns number of chars written (excluding null terminator).
 static int JsonEscapeInto( char* dst, int dstMax, const char* src )
 {
-	if ( !src || dstMax <= 1 ) return 0;
+	if ( !src || dstMax <= 1 )
+		return 0;
 	int n = 0;
 	for ( const char* p = src; *p != '\0'; p++ )
 	{
@@ -1894,21 +1868,50 @@ static int JsonEscapeInto( char* dst, int dstMax, const char* src )
 		int need;
 		switch ( ch )
 		{
-			case '\\': case '"': case '\n': case '\r': case '\t': need = 2; break;
-			default: need = ( ch < 0x20 ) ? 6 : 1; break;
+		case '\\':
+		case '"':
+		case '\n':
+		case '\r':
+		case '\t':
+			need = 2;
+			break;
+		default:
+			need = ( ch < 0x20 ) ? 6 : 1;
+			break;
 		}
-		if ( n + need >= dstMax ) break;
+		if ( n + need >= dstMax )
+			break;
 		switch ( ch )
 		{
-			case '\\': dst[ n++ ] = '\\'; dst[ n++ ] = '\\'; break;
-			case '"':  dst[ n++ ] = '\\'; dst[ n++ ] = '"';  break;
-			case '\n': dst[ n++ ] = '\\'; dst[ n++ ] = 'n';  break;
-			case '\r': dst[ n++ ] = '\\'; dst[ n++ ] = 'r';  break;
-			case '\t': dst[ n++ ] = '\\'; dst[ n++ ] = 't';  break;
-			default:
-				if ( ch < 0x20 ) { snprintf( dst + n, 7, "\\u%04X", ( unsigned )ch ); n += 6; }
-				else dst[ n++ ] = ( char )ch;
-				break;
+		case '\\':
+			dst[ n++ ] = '\\';
+			dst[ n++ ] = '\\';
+			break;
+		case '"':
+			dst[ n++ ] = '\\';
+			dst[ n++ ] = '"';
+			break;
+		case '\n':
+			dst[ n++ ] = '\\';
+			dst[ n++ ] = 'n';
+			break;
+		case '\r':
+			dst[ n++ ] = '\\';
+			dst[ n++ ] = 'r';
+			break;
+		case '\t':
+			dst[ n++ ] = '\\';
+			dst[ n++ ] = 't';
+			break;
+		default:
+			if ( ch < 0x20 )
+			{
+				snprintf( dst + n, 7, "\\u%04X", ( unsigned )ch );
+				n += 6;
+			}
+			else
+				dst[ n++ ] = ( char )ch;
+			break;
 		}
 	}
 	dst[ n ] = '\0';
@@ -1919,12 +1922,15 @@ static int JsonEscapeInto( char* dst, int dstMax, const char* src )
 // Keeps rem in [1..bufSize] so callers cannot underflow and corrupt memory on truncation.
 static void RespBufAppendf( char* buf, int bufSize, int& pos, int& rem, const char* fmt, ... )
 {
-	if ( !buf || bufSize <= 0 || !fmt ) return;
+	if ( !buf || bufSize <= 0 || !fmt )
+		return;
 
 	if ( rem <= 1 )
 	{
-		if ( pos < 0 ) pos = 0;
-		if ( pos >= bufSize ) pos = bufSize - 1;
+		if ( pos < 0 )
+			pos = 0;
+		if ( pos >= bufSize )
+			pos = bufSize - 1;
 		buf[ pos ] = '\0';
 		rem = 1;
 		return;
@@ -1945,7 +1951,8 @@ static void RespBufAppendf( char* buf, int bufSize, int& pos, int& rem, const ch
 	if ( written >= rem )
 	{
 		pos += rem - 1;
-		if ( pos >= bufSize ) pos = bufSize - 1;
+		if ( pos >= bufSize )
+			pos = bufSize - 1;
 		rem = 1;
 	}
 	else
@@ -1992,7 +1999,7 @@ static bool IsValidMacAddress( const char* mac )
 
 static void RecordPushUpdate( const char* target, const char* payload, int bytes, int httpCode )
 {
-	char ip[ 64 ] = {0};
+	char ip[ 64 ] = { 0 };
 	ExtractIpFromUri( target, ip, sizeof( ip ) );
 
 	lockHistory();
@@ -2141,7 +2148,7 @@ static void RecordUnknownType( uint8_t type, const char* mac, bool hasSubtype = 
 	for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
 	{
 		if ( UnknownTypes[ i ].mac[ 0 ] != '\0' &&
-			 strncmp( UnknownTypes[ i ].mac, safeMac, sizeof( UnknownTypes[ i ].mac ) ) == 0 )
+		     strncmp( UnknownTypes[ i ].mac, safeMac, sizeof( UnknownTypes[ i ].mac ) ) == 0 )
 		{
 			// Update type info in case it changes and increment count
 			UnknownTypes[ i ].type = type;
@@ -2172,7 +2179,8 @@ static void SampleCpuUsage()
 {
 	const UBaseType_t maxTasks = 32;
 	TaskStatus_t* taskBuffer = ( TaskStatus_t* )malloc( sizeof( TaskStatus_t ) * maxTasks );
-	if ( !taskBuffer ) return;
+	if ( !taskBuffer )
+		return;
 
 	uint32_t totalRunTime = 0;
 	UBaseType_t taskCount = uxTaskGetSystemState( taskBuffer, maxTasks, &totalRunTime );
@@ -2264,30 +2272,47 @@ static void SendDiscoveryAnnouncement( const IPAddress* targetIp = nullptr, uint
 
 static void HandleDiscoveryPacket( AsyncUDPPacket& packet, const char* listenerName )
 {
-	String packetText;
-	packetText.reserve( packet.length() + 1 );
-	for ( size_t i = 0; i < packet.length(); i++ )
+	// Build packet text directly into buffer
+	char packetText[ 256 ];
+	size_t textLen = 0;
+	for ( size_t i = 0; i < packet.length() && textLen < sizeof( packetText ) - 1; i++ )
 	{
 		char c = ( char )packet.data()[ i ];
 		if ( c == '\0' )
-		{
 			break;
-		}
-		packetText += c;
+		packetText[ textLen++ ] = c;
 	}
-	packetText.trim();
+	packetText[ textLen ] = '\0';
 
-	String packetLower = packetText;
-	packetLower.toLowerCase();
-	if ( ( packetText == "Are you there SwitchBot?" ) ||
-		 ( packetText == "Are you there SwitchBot" ) ||
-		 ( packetLower.indexOf( "are you there switchbot" ) >= 0 ) )
+	// Trim trailing whitespace
+	while ( textLen > 0 && ( packetText[ textLen - 1 ] == ' ' || packetText[ textLen - 1 ] == '\t' ||
+	                         packetText[ textLen - 1 ] == '\r' || packetText[ textLen - 1 ] == '\n' ) )
+	{
+		packetText[ --textLen ] = '\0';
+	}
+
+	// Check for SwitchBot discovery query (case-insensitive substring search)
+	bool isDiscoveryQuery = ( strcmp( packetText, "Are you there SwitchBot?" ) == 0 ) ||
+	                       ( strcmp( packetText, "Are you there SwitchBot" ) == 0 );
+
+	// Case-insensitive substring search using strcasestr (if available) or manual search
+	if ( !isDiscoveryQuery )
+	{
+		char packetLower[ 256 ];
+		for ( size_t i = 0; i <= textLen; i++ )
+		{
+			packetLower[ i ] = tolower( packetText[ i ] );
+		}
+		isDiscoveryQuery = ( strstr( packetLower, "are you there switchbot" ) != nullptr );
+	}
+
+	if ( isDiscoveryQuery )
 	{
 		Serial.printf( "Received discovery on %s: '%s' from %s:%u\n",
-			listenerName,
-			packetText.c_str(),
-			packet.remoteIP().toString().c_str(),
-			packet.remotePort() );
+		               listenerName,
+		               packetText,
+		               packet.remoteIP().toString().c_str(),
+		               packet.remotePort() );
 		IPAddress remoteIp = packet.remoteIP();
 		uint16_t remotePort = packet.remotePort();
 		SendDiscoveryAnnouncement( &remoteIp, remotePort );
@@ -2296,11 +2321,11 @@ static void HandleDiscoveryPacket( AsyncUDPPacket& packet, const char* listenerN
 	else
 	{
 		Serial.printf( "Received other UDP packet on %s from %s:%u len=%u text='%s'\n",
-			listenerName,
-			packet.remoteIP().toString().c_str(),
-			packet.remotePort(),
-			( unsigned int )packet.length(),
-			packetText.c_str() );
+		               listenerName,
+		               packet.remoteIP().toString().c_str(),
+		               packet.remotePort(),
+		               ( unsigned int )packet.length(),
+		               packetText );
 	}
 }
 
@@ -2314,17 +2339,19 @@ void handleRoot( AsyncWebServerRequest* request )
 void handleNotFound( AsyncWebServerRequest* request )
 {
 	digitalWrite( led, 1 );
-	String message = "File Not Found\n\n";
-	message += "URI: ";
-	message += request->url();
-	message += "\nMethod: ";
-	message += ( request->method() == HTTP_GET ) ? "GET" : "POST";
-	message += "\nArguments: ";
-	message += ( unsigned long )request->args();
-	message += "\n";
-	for ( uint8_t i = 0; i < request->args(); i++ )
+	char message[ 1024 ];
+	int pos = 0;
+	pos += snprintf( message + pos, sizeof( message ) - pos, "File Not Found\n\nURI: %s\nMethod: %s\nArguments: %u\n",
+		request->url().c_str(),
+		( request->method() == HTTP_GET ) ? "GET" : "POST",
+		( unsigned int )request->args() );
+
+	for ( uint8_t i = 0; i < request->args() && i < 20; i++ )  // limit to 20 args to prevent overflow
 	{
-		message += " " + request->argName( i ) + ": " + request->arg( i ) + "\n";
+		pos += snprintf( message + pos, sizeof( message ) - pos, " %s: %s\n",
+			request->argName( i ).c_str(),
+			request->arg( i ).c_str() );
+		if ( pos >= ( int )sizeof( message ) - 100 ) break;  // stop if getting close to buffer end
 	}
 	request->send( 404, "text/plain", message );
 	digitalWrite( led, 0 );
@@ -2498,9 +2525,9 @@ void setup()
 		if ( ( request->url() == "/api/v1/callback/add" ) || ( request->url() == "/api/v1/callback/remove" ) || ( request->url() == "/api/v1/device/write" ) )
 			return; // response object already created by onRequestBody
 
-		String url = request->url();
-		String clientIP = IPAddress( request->client()->getRemoteAddress() ).toString();
-		Serial.printf( "API function %s not found from %s\n", url.c_str(), clientIP.c_str() );
+		char clientIP[ 64 ];
+		snprintf( clientIP, sizeof( clientIP ), "%s", IPAddress( request->client()->getRemoteAddress() ).toString().c_str() );
+		Serial.printf( "API function %s not found from %s\n", request->url().c_str(), clientIP );
 
 		request->send( 404, "text/plain", "Not found" );
 	} );
@@ -2512,10 +2539,10 @@ void setup()
 			    return;
 		    }
 
-		    String requestUrl = request->url();
-		    if ( ( requestUrl != "/api/v1/callback/add" ) &&
-		         ( requestUrl != "/api/v1/callback/remove" ) &&
-		         ( requestUrl != "/api/v1/device/write" ) )
+		    const char* requestUrl = request->url().c_str();
+		    if ( ( strcmp( requestUrl, "/api/v1/callback/add" ) != 0 ) &&
+		         ( strcmp( requestUrl, "/api/v1/callback/remove" ) != 0 ) &&
+		         ( strcmp( requestUrl, "/api/v1/device/write" ) != 0 ) )
 		    {
 			    // Leave unrelated POST routes (e.g. OTA /ota multipart upload)
 			    // to their dedicated handlers.
@@ -2559,21 +2586,19 @@ void setup()
 			    return;
 		    }
 
-		    String payload = *body;
+		    const uint8_t* payloadData = ( const uint8_t* )body->c_str();
+		    size_t payloadLen = body->length();
 		    delete body;
 		    request->_tempObject = nullptr;
 
-		    const uint8_t* payloadData = ( const uint8_t* )payload.c_str();
-		    size_t payloadLen = payload.length();
-
-		    if ( requestUrl == "/api/v1/callback/add" )
+		    if ( strcmp( requestUrl, "/api/v1/callback/add" ) == 0 )
 		    {
 			    Serial.println( "Received request for /api/v1/callback/add" );
-			    String uri;
-			    if ( TryGetJsonStringField( payloadData, payloadLen, "uri", uri ) && uri.length() > 0 )
+			    char uri[ 512 ];
+			    if ( TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "uri", uri, sizeof( uri ) ) )
 			    {
 				    lockCallbacks();
-				    bool addOk = OurCallbacks.Add( uri.c_str(), millis() );
+				    bool addOk = OurCallbacks.Add( uri, millis() );
 				    unlockCallbacks();
 				    if ( addOk )
 				    {
@@ -2591,14 +2616,14 @@ void setup()
 				    Serial.println( "Callback error 400" );
 			    }
 		    }
-		    else if ( requestUrl == "/api/v1/callback/remove" )
+		    else if ( strcmp( requestUrl, "/api/v1/callback/remove" ) == 0 )
 		    {
 			    Serial.println( "Received request for /api/v1/callback/remove" );
-			    String uri;
-			    if ( TryGetJsonStringField( payloadData, payloadLen, "uri", uri ) && uri.length() > 0 )
+			    char uri[ 512 ];
+			    if ( TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "uri", uri, sizeof( uri ) ) )
 			    {
 				    lockCallbacks();
-				    bool removeOk = OurCallbacks.Remove( uri.c_str() );
+				    bool removeOk = OurCallbacks.Remove( uri );
 				    unlockCallbacks();
 				    if ( removeOk )
 				    {
@@ -2614,21 +2639,26 @@ void setup()
 				    request->send( 400, "text/plain", "Bad Request" );
 			    }
 		    }
-		    else if ( requestUrl == "/api/v1/device/write" )
+		    else if ( strcmp( requestUrl, "/api/v1/device/write" ) == 0 )
 		    {
-				String sourceIP = IPAddress( request->client()->getRemoteAddress() ).toString();
-				Serial.printf( "Received /api/v1/device/write from %s payloadLen=%u payload=%s\n",
-					sourceIP.c_str(),
-					( unsigned int )payloadLen,
-					payload.c_str() );
+			    char sourceIP[ 64 ];
+			    snprintf( sourceIP, sizeof( sourceIP ), "%s",
+			              IPAddress( request->client()->getRemoteAddress() ).toString().c_str() );
+			    Serial.printf( "Received /api/v1/device/write from %s payloadLen=%u payload=%s\n",
+			                   sourceIP,
+			                   ( unsigned int )payloadLen,
+			                   ( const char* )payloadData );
 			    String clientAddress;
 			    String dataToWrite;
 			    uint8_t commandData[ sizeof( BLE_COMMAND::Data ) ];
 			    uint8_t commandDataLen = 0;
 			    bool hasAddress = TryGetJsonStringField( payloadData, payloadLen, "address", clientAddress );
-			    if ( !hasAddress ) hasAddress = TryGetJsonStringField( payloadData, payloadLen, "Address", clientAddress );
-			    if ( !hasAddress ) hasAddress = TryGetJsonStringField( payloadData, payloadLen, "mac", clientAddress );
-			    if ( !hasAddress ) hasAddress = TryGetJsonStringField( payloadData, payloadLen, "MAC", clientAddress );
+			    if ( !hasAddress )
+				    hasAddress = TryGetJsonStringField( payloadData, payloadLen, "Address", clientAddress );
+			    if ( !hasAddress )
+				    hasAddress = TryGetJsonStringField( payloadData, payloadLen, "mac", clientAddress );
+			    if ( !hasAddress )
+				    hasAddress = TryGetJsonStringField( payloadData, payloadLen, "MAC", clientAddress );
 			    if ( !hasAddress && request->hasArg( "address" ) )
 			    {
 				    clientAddress = request->arg( "address" );
@@ -2636,9 +2666,12 @@ void setup()
 			    }
 
 			    bool hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "data", dataToWrite );
-			    if ( !hasData ) hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "Data", dataToWrite );
-			    if ( !hasData ) hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "payload", dataToWrite );
-			    if ( !hasData ) hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "commandData", dataToWrite );
+			    if ( !hasData )
+				    hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "Data", dataToWrite );
+			    if ( !hasData )
+				    hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "payload", dataToWrite );
+			    if ( !hasData )
+				    hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "commandData", dataToWrite );
 			    if ( !hasData && request->hasArg( "data" ) )
 			    {
 				    String argData = request->arg( "data" );
@@ -2651,14 +2684,14 @@ void setup()
 			    }
 			    bool parsedData = hasData && ParseByteListString( dataToWrite, commandData, sizeof( commandData ), commandDataLen );
 			    bool hasNonEmptyAddress = ( clientAddress.length() > 0 );
-				Serial.printf( "Parsed /api/v1/device/write from %s hasAddress=%d address=%s hasData=%d data=%s parsedData=%d dataLen=%u\n",
-					sourceIP.c_str(),
-					hasAddress ? 1 : 0,
-					clientAddress.c_str(),
-					hasData ? 1 : 0,
-					dataToWrite.c_str(),
-					parsedData ? 1 : 0,
-					( unsigned int )commandDataLen );
+			    Serial.printf( "Parsed /api/v1/device/write from %s hasAddress=%d address=%s hasData=%d data=%s parsedData=%d dataLen=%u\n",
+			                   sourceIP,
+			                   hasAddress ? 1 : 0,
+			                   clientAddress.c_str(),
+			                   hasData ? 1 : 0,
+			                   dataToWrite.c_str(),
+			                   parsedData ? 1 : 0,
+			                   ( unsigned int )commandDataLen );
 
 			    if ( hasAddress && hasData && parsedData && hasNonEmptyAddress )
 			    {
@@ -2666,69 +2699,79 @@ void setup()
 				    int deviceIdx = BLE_Devices.FindDevice( clientAddress.c_str() );
 				    if ( deviceIdx >= 0 )
 				    {
-					    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), ( unsigned int )dataToWrite.length(), sourceIP.c_str() );
+					    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), ( unsigned int )dataToWrite.length(), sourceIP );
 
 					    if ( BLECommandQ.Find( clientAddress.c_str(), commandData, commandDataLen ) )
 					    {
 						    // Same command already queued
 						    request->send( 200, "text/plain", "OK" );
 						    Serial.println( "Command already in the Q" );
-							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "already-queued" );
+						    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "already-queued" );
 					    }
-					    else if ( BLECommandQ.Push( clientAddress.c_str(), commandData, commandDataLen, sourceIP.c_str() ) )
+					    else if ( BLECommandQ.Push( clientAddress.c_str(), commandData, commandDataLen, sourceIP ) )
 					    {
 						    request->send( 200, "text/plain", "OK" );
-							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "queued" );
+						    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "queued" );
 					    }
 					    else
 					    {
-						    String out = "{\"message\":\"Too Many Requests\",\"error\":\"QueueFull\",\"address\":\"" + JsonEscape( clientAddress.c_str() ) + "\"}";
-						    request->send( 429, "application/json", out );
+						    int pos = 0;
+						    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "{\"message\":\"Too Many Requests\",\"error\":\"QueueFull\",\"address\":\"" );
+						    pos += JsonEscapeInto( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, clientAddress.c_str() );
+						    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "\"}" );
+						    request->send( 429, "application/json", sharedRespBuf );
 						    Serial.println( "I have too much in my command Q" );
-							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "queue-full" );
+						    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "queue-full" );
 					    }
 				    }
 				    else
 				    {
-					    String out = "{\"message\":\"Unknown device\",\"error\":\"UnknownDevice\",\"address\":\"" + JsonEscape( clientAddress.c_str() ) + "\"}";
-					    request->send( 422, "application/json", out );
+					    int pos = 0;
+					    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "{\"message\":\"Unknown device\",\"error\":\"UnknownDevice\",\"address\":\"" );
+					    pos += JsonEscapeInto( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, clientAddress.c_str() );
+					    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "\"}" );
+					    request->send( 422, "application/json", sharedRespBuf );
 					    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress.c_str() );
-							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), "unknown-device" );
+					    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "unknown-device" );
 				    }
 			    }
 			    else
 			    {
-				    String details = "";
+				    char details[ 64 ] = "";
 				    if ( !hasAddress )
 				    {
-					    details += "missing-address";
+					    strcpy( details, "missing-address" );
 				    }
 				    else if ( !hasNonEmptyAddress )
 				    {
-					    details += "empty-address";
+					    strcpy( details, "empty-address" );
 				    }
 
 				    if ( !hasData )
 				    {
-					    if ( details.length() > 0 )
+					    if ( details[ 0 ] != '\0' )
 					    {
-						    details += ",";
+						    strncat( details, ",", sizeof( details ) - strlen( details ) - 1 );
 					    }
-					    details += "missing-data";
+					    strncat( details, "missing-data", sizeof( details ) - strlen( details ) - 1 );
 				    }
 				    else if ( !parsedData )
 				    {
-					    if ( details.length() > 0 )
+					    if ( details[ 0 ] != '\0' )
 					    {
-						    details += ",";
+						    strncat( details, ",", sizeof( details ) - strlen( details ) - 1 );
 					    }
-					    details += "invalid-data";
+					    strncat( details, "invalid-data", sizeof( details ) - strlen( details ) - 1 );
 				    }
 
-				    String out = "{\"message\":\"Bad Request\",\"error\":\"InvalidPayload\",\"details\":\"" + JsonEscape( details.c_str() ) + "\",\"expected\":{\"address\":\"AA:BB:CC:DD:EE:FF\",\"data\":[87,15,71,1,5,0,255,85]}}";
-				    request->send( 400, "application/json", out );
-							String badReqResult = "bad-request:" + details;
-							RecordBleCommandRequest( sourceIP.c_str(), clientAddress.c_str(), dataToWrite.c_str(), badReqResult.c_str() );
+				    int pos = 0;
+				    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "{\"message\":\"Bad Request\",\"error\":\"InvalidPayload\",\"details\":\"" );
+				    pos += JsonEscapeInto( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, details );
+				    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "\",\"expected\":{\"address\":\"AA:BB:CC:DD:EE:FF\",\"data\":[87,15,71,1,5,0,255,85]}}" );
+				    request->send( 400, "application/json", sharedRespBuf );
+				    char badReqResult[ 128 ];
+				    snprintf( badReqResult, sizeof( badReqResult ), "bad-request:%s", details );
+				    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), badReqResult );
 			    }
 		    }
 
@@ -2750,7 +2793,7 @@ void setup()
 			// Only serve the HTML page if the caller explicitly wants text/html
 			// and has NOT asked for application/json
 			wantJson = ( accept.indexOf( "text/html" ) < 0 ||
-						 accept.indexOf( "application/json" ) >= 0 );
+			             accept.indexOf( "application/json" ) >= 0 );
 		}
 
 		if ( wantJson )
@@ -2769,10 +2812,15 @@ void setup()
 	server.on( "/api/v1/stats/free-heap-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 
-		int pos = 0; int rem = ( int )sizeof( sharedRespBuf );
-#define HIST_APPEND( ... ) do { RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); } while(0)
+		int pos = 0;
+		int rem = ( int )sizeof( sharedRespBuf );
+#define HIST_APPEND( ... )                                                                      \
+	do                                                                                          \
+	{                                                                                           \
+		RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); \
+	} while ( 0 )
 		HIST_APPEND( "{\"intervalMs\":%lu,\"maxPoints\":%u,\"count\":%u,\"values\":[",
-			( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )FreeHeapHistoryCount );
+		             ( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )FreeHeapHistoryCount );
 		for ( uint16_t i = 0; i < FreeHeapHistoryCount; i++ )
 		{
 			const uint16_t idx = ( FreeHeapHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
@@ -2787,10 +2835,15 @@ void setup()
 	server.on( "/api/v1/stats/adverts-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 
-		int pos = 0; int rem = ( int )sizeof( sharedRespBuf );
-#define HIST_APPEND( ... ) do { RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); } while(0)
+		int pos = 0;
+		int rem = ( int )sizeof( sharedRespBuf );
+#define HIST_APPEND( ... )                                                                      \
+	do                                                                                          \
+	{                                                                                           \
+		RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); \
+	} while ( 0 )
 		HIST_APPEND( "{\"intervalMs\":%lu,\"maxPoints\":%u,\"count\":%u,\"values\":[",
-			( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )BleRateHistoryCount );
+		             ( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )BleRateHistoryCount );
 		for ( uint16_t i = 0; i < BleRateHistoryCount; i++ )
 		{
 			const uint16_t idx = ( BleRateHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
@@ -2805,10 +2858,15 @@ void setup()
 	server.on( "/api/v1/stats/matches-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 
-		int pos = 0; int rem = ( int )sizeof( sharedRespBuf );
-#define HIST_APPEND( ... ) do { RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); } while(0)
+		int pos = 0;
+		int rem = ( int )sizeof( sharedRespBuf );
+#define HIST_APPEND( ... )                                                                      \
+	do                                                                                          \
+	{                                                                                           \
+		RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); \
+	} while ( 0 )
 		HIST_APPEND( "{\"intervalMs\":%lu,\"maxPoints\":%u,\"count\":%u,\"values\":[",
-			( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )BleRateHistoryCount );
+		             ( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )BleRateHistoryCount );
 		for ( uint16_t i = 0; i < BleRateHistoryCount; i++ )
 		{
 			const uint16_t idx = ( BleRateHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
@@ -2823,16 +2881,21 @@ void setup()
 	server.on( "/api/v1/stats/actual-updates-history", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 
-		int pos = 0; int rem = ( int )sizeof( sharedRespBuf );
-#define HIST_APPEND( ... ) do { RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); } while(0)
+		int pos = 0;
+		int rem = ( int )sizeof( sharedRespBuf );
+#define HIST_APPEND( ... )                                                                      \
+	do                                                                                          \
+	{                                                                                           \
+		RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); \
+	} while ( 0 )
 		HIST_APPEND( "{\"intervalMs\":%lu,\"maxPoints\":%u,\"count\":%u,\"values\":[",
-			( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )BleRateHistoryCount );
+		             ( unsigned long )STATS_SAMPLE_MS, ( unsigned )FREE_HEAP_HISTORY_MAX, ( unsigned )BleRateHistoryCount );
 		for ( uint16_t i = 0; i < BleRateHistoryCount; i++ )
 		{
 			const uint16_t idx = ( BleRateHistoryStart + i ) % FREE_HEAP_HISTORY_MAX;
 			HIST_APPEND( "%s%ld", i > 0 ? "," : "", ( long )ActualUpdatesPerMinuteHistory[ idx ] );
 		}
-		HIST_APPEND( "]}");
+		HIST_APPEND( "]}" );
 #undef HIST_APPEND
 
 		request->send( 200, "application/json", sharedRespBuf );
@@ -2865,8 +2928,18 @@ void setup()
 
 		int pos = 0;
 		int rem = ( int )sizeof( sharedRespBuf );
-#define MON_APPEND( ... ) do { RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); } while ( 0 )
-#define MON_ESC( str ) do { int _n = JsonEscapeInto( sharedRespBuf + pos, rem, str ); pos += _n; rem -= _n; } while ( 0 )
+#define MON_APPEND( ... )                                                                       \
+	do                                                                                          \
+	{                                                                                           \
+		RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); \
+	} while ( 0 )
+#define MON_ESC( str )                                            \
+	do                                                            \
+	{                                                             \
+		int _n = JsonEscapeInto( sharedRespBuf + pos, rem, str ); \
+		pos += _n;                                                \
+		rem -= _n;                                                \
+	} while ( 0 )
 
 		MON_APPEND( "{\"registered\":[" );
 		char uriBuf[ 256 ];
@@ -2877,11 +2950,17 @@ void setup()
 			lockCallbacks();
 			bool gotCallback = OurCallbacks.Get( callbackIndex, uriBuf, sizeof( uriBuf ) );
 			unlockCallbacks();
-			if ( !gotCallback ) break;
+			if ( !gotCallback )
+				break;
 			char ipBuf[ 64 ] = { 0 };
 			ExtractIpFromUri( uriBuf, ipBuf, sizeof( ipBuf ) );
-			if ( callbackAdded ) MON_APPEND( "," );
-			MON_APPEND( "{\"uri\":\"" ); MON_ESC( uriBuf ); MON_APPEND( "\",\"ip\":\"" ); MON_ESC( ipBuf ); MON_APPEND( "\"}" );
+			if ( callbackAdded )
+				MON_APPEND( "," );
+			MON_APPEND( "{\"uri\":\"" );
+			MON_ESC( uriBuf );
+			MON_APPEND( "\",\"ip\":\"" );
+			MON_ESC( ipBuf );
+			MON_APPEND( "\"}" );
 			callbackAdded = true;
 			callbackIndex++;
 		}
@@ -2890,10 +2969,12 @@ void setup()
 		for ( int i = PushUpdateHistoryCount - 1; i >= 0; i-- )
 		{
 			uint8_t idx = ( PushUpdateHistoryStart + i ) % HOMEY_HISTORY_MAX;
-			if ( i != PushUpdateHistoryCount - 1 ) MON_APPEND( "," );
+			if ( i != PushUpdateHistoryCount - 1 )
+				MON_APPEND( "," );
 			MON_APPEND( "{\"atMs\":%lu,\"payload\":\"", ( unsigned long )PushUpdateHistory[ idx ].atMs );
 			MON_ESC( PushUpdateHistory[ idx ].payload );
-			MON_APPEND( "\",\"ip\":\"" ); MON_ESC( PushUpdateHistory[ idx ].ip );
+			MON_APPEND( "\",\"ip\":\"" );
+			MON_ESC( PushUpdateHistory[ idx ].ip );
 			MON_APPEND( "\",\"bytes\":%d,\"httpCode\":%d}", PushUpdateHistory[ idx ].bytes, PushUpdateHistory[ idx ].httpCode );
 		}
 		unlockHistory();
@@ -2902,18 +2983,22 @@ void setup()
 		for ( int i = BleCommandHistoryCount - 1; i >= 0; i-- )
 		{
 			uint8_t idx = ( BleCommandHistoryStart + i ) % HOMEY_HISTORY_MAX;
-			if ( i != BleCommandHistoryCount - 1 ) MON_APPEND( "," );
+			if ( i != BleCommandHistoryCount - 1 )
+				MON_APPEND( "," );
 			MON_APPEND( "{\"atMs\":%lu,\"sourceIp\":\"", ( unsigned long )BleCommandHistory[ idx ].atMs );
 			MON_ESC( BleCommandHistory[ idx ].sourceIp );
-			MON_APPEND( "\",\"address\":\"" ); MON_ESC( BleCommandHistory[ idx ].address );
-			MON_APPEND( "\",\"data\":\"" );    MON_ESC( BleCommandHistory[ idx ].data );
-			MON_APPEND( "\",\"result\":\"" );  MON_ESC( BleCommandHistory[ idx ].result );
+			MON_APPEND( "\",\"address\":\"" );
+			MON_ESC( BleCommandHistory[ idx ].address );
+			MON_APPEND( "\",\"data\":\"" );
+			MON_ESC( BleCommandHistory[ idx ].data );
+			MON_APPEND( "\",\"result\":\"" );
+			MON_ESC( BleCommandHistory[ idx ].result );
 			MON_APPEND( "\"}" );
 		}
 		unlockHistory();
 		MON_APPEND( "],\"uptimeMs\":%lu,\"nextUpdateAtMs\":%lu,\"bleCommandSeq\":%lu,\"pushUpdateSeq\":%lu}",
-			( unsigned long )millis(), ( unsigned long )( LastStatsAt + STATS_SAMPLE_MS ),
-			( unsigned long )BleCommandSeq, ( unsigned long )PushUpdateSeq );
+		            ( unsigned long )millis(), ( unsigned long )( LastStatsAt + STATS_SAMPLE_MS ),
+		            ( unsigned long )BleCommandSeq, ( unsigned long )PushUpdateSeq );
 #undef MON_APPEND
 #undef MON_ESC
 
@@ -2933,50 +3018,50 @@ void setup()
 		request->send( 200, "application/json", buf );
 	} );
 
-		server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
-			digitalWrite( led, 1 );
+	server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
 
-			AsyncResponseStream* response = request->beginResponseStream( "application/json" );
-			response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
-			response->addHeader( "Pragma", "no-cache" );
-			response->addHeader( "Expires", "0" );
-			response->print( "{" );
-			response->printf( "\"uptimeMs\":%lu", ( unsigned long )millis() );
-			response->printf( ",\"advertsSeenPerMinute\":%ld", ( long )LastAdvertsSeenPerMinute );
-			response->printf( ",\"matchedServiceDataPerMinute\":%ld", ( long )LastMatchedServiceDataPerMinute );
-			response->printf( ",\"matchedEmptyPayloadPerMinute\":%ld", ( long )LastMatchedEmptyPayloadPerMinute );
-			response->printf( ",\"matchedRejectedPerMinute\":%ld", ( long )LastMatchedRejectedPerMinute );
-			response->printf( ",\"badDataRejectedPerMinute\":%ld", ( long )LastBadDataRejectedPerMinute );
-			response->printf( ",\"updatesPerMinute\":%ld", ( long )LastUpdatesPerMinute );
-			response->printf( ",\"actualDataUpdatesPerMinute\":%ld", ( long )LastActualDataUpdatesPerMinute );
-			response->printf( ",\"currentMinuteUpdates\":%ld", ( long )NumUpdates );
-			response->printf( ",\"noUpdateMinutes\":%lu", ( unsigned long )NumUpdatesAt0 );
-			response->printf( ",\"freeHeap\":%lu", ( unsigned long )LastFreeHeap );
-			response->printf( ",\"largestHeapBlock\":%lu", ( unsigned long )LastLargestHeapBlock );
-			response->printf( ",\"lastStatsAtMs\":%lu", ( unsigned long )LastStatsAt );
-			response->printf( ",\"statsIntervalMs\":%lu", ( unsigned long )STATS_SAMPLE_MS );
-			response->printf( ",\"cpuUsage\":%u", ( unsigned )LastCpuUsagePercent );
-			response->printf( ",\"registeredDevices\":%u", ( unsigned )BLE_Devices.GetNumberOfDevices() );
-			response->print( ",\"unknownTypes\":[" );
-			for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
+		AsyncResponseStream* response = request->beginResponseStream( "application/json" );
+		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
+		response->addHeader( "Pragma", "no-cache" );
+		response->addHeader( "Expires", "0" );
+		response->print( "{" );
+		response->printf( "\"uptimeMs\":%lu", ( unsigned long )millis() );
+		response->printf( ",\"advertsSeenPerMinute\":%ld", ( long )LastAdvertsSeenPerMinute );
+		response->printf( ",\"matchedServiceDataPerMinute\":%ld", ( long )LastMatchedServiceDataPerMinute );
+		response->printf( ",\"matchedEmptyPayloadPerMinute\":%ld", ( long )LastMatchedEmptyPayloadPerMinute );
+		response->printf( ",\"matchedRejectedPerMinute\":%ld", ( long )LastMatchedRejectedPerMinute );
+		response->printf( ",\"badDataRejectedPerMinute\":%ld", ( long )LastBadDataRejectedPerMinute );
+		response->printf( ",\"updatesPerMinute\":%ld", ( long )LastUpdatesPerMinute );
+		response->printf( ",\"actualDataUpdatesPerMinute\":%ld", ( long )LastActualDataUpdatesPerMinute );
+		response->printf( ",\"currentMinuteUpdates\":%ld", ( long )NumUpdates );
+		response->printf( ",\"noUpdateMinutes\":%lu", ( unsigned long )NumUpdatesAt0 );
+		response->printf( ",\"freeHeap\":%lu", ( unsigned long )LastFreeHeap );
+		response->printf( ",\"largestHeapBlock\":%lu", ( unsigned long )LastLargestHeapBlock );
+		response->printf( ",\"lastStatsAtMs\":%lu", ( unsigned long )LastStatsAt );
+		response->printf( ",\"statsIntervalMs\":%lu", ( unsigned long )STATS_SAMPLE_MS );
+		response->printf( ",\"cpuUsage\":%u", ( unsigned )LastCpuUsagePercent );
+		response->printf( ",\"registeredDevices\":%u", ( unsigned )BLE_Devices.GetNumberOfDevices() );
+		response->print( ",\"unknownTypes\":[" );
+		for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
+		{
+			response->printf( "%s{\"type\":%u", i > 0 ? "," : "", ( unsigned )UnknownTypes[ i ].type );
+			if ( UnknownTypes[ i ].hasSubtype )
 			{
-				response->printf( "%s{\"type\":%u", i > 0 ? "," : "", ( unsigned )UnknownTypes[ i ].type );
-				if ( UnknownTypes[ i ].hasSubtype )
-				{
-					response->printf( ",\"subtype\":\"%02X%02X%02X\"", UnknownTypes[ i ].subtypeB0, UnknownTypes[ i ].subtypeB1, UnknownTypes[ i ].subtypeB2 );
-				}
-				if ( UnknownTypes[ i ].mac[ 0 ] != '\0' )
-				{
-					response->printf( ",\"mac\":\"%s\"", UnknownTypes[ i ].mac );
-				}
-				response->printf( ",\"count\":%lu}", ( unsigned long )UnknownTypes[ i ].count );
+				response->printf( ",\"subtype\":\"%02X%02X%02X\"", UnknownTypes[ i ].subtypeB0, UnknownTypes[ i ].subtypeB1, UnknownTypes[ i ].subtypeB2 );
 			}
-			response->print( "]}" );
+			if ( UnknownTypes[ i ].mac[ 0 ] != '\0' )
+			{
+				response->printf( ",\"mac\":\"%s\"", UnknownTypes[ i ].mac );
+			}
+			response->printf( ",\"count\":%lu}", ( unsigned long )UnknownTypes[ i ].count );
+		}
+		response->print( "]}" );
 
-			request->send( response );
+		request->send( response );
 
-			digitalWrite( led, 0 );
-		} );
+		digitalWrite( led, 0 );
+	} );
 
 	server.on( "/api/v1/device", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
@@ -3079,7 +3164,8 @@ void loop()
 
 			esp_task_wdt_init( &wdt_config );
 			esp_task_wdt_add( NULL );
-			while ( true );
+			while ( true )
+				;
 		}
 
 		if ( pendingSSEUpdate && ( millis() - lastSSESend >= 1000 ) )
@@ -3089,12 +3175,12 @@ void loop()
 			bleEvents.send( "update", "ble", millis() );
 		}
 
-			if ( pendingSSEStats && ( millis() - lastSSEStatsSend >= 1000 ) )
-			{
-				pendingSSEStats = false;
-				lastSSEStatsSend = millis();
-				bleEvents.send( "update", "stats", millis() );
-			}
+		if ( pendingSSEStats && ( millis() - lastSSEStatsSend >= 1000 ) )
+		{
+			pendingSSEStats = false;
+			lastSSEStatsSend = millis();
+			bleEvents.send( "update", "stats", millis() );
+		}
 
 		if ( millis() >= sendBroadcast )
 		{
@@ -3376,7 +3462,8 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 						{
 							Serial.println( "Waiting for notification" );
 							unsigned long endTime = millis() + 2000;
-							while ( ( BLENotifyLength == 0 ) && ( millis() < endTime ) );
+							while ( ( BLENotifyLength == 0 ) && ( millis() < endTime ) )
+								;
 							if ( BLENotifyLength > 0 )
 							{
 								Serial.println( "Got notification" );
