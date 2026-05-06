@@ -469,12 +469,14 @@ static const char OTA_UPDATE_HTML[] PROGMEM = R"HTMLEOF(
 							if (!uploadComplete) {
 								uploadBtn.disabled = false;
 								statusEl.textContent = 'Update failed (HTTP ' + xhr.status + ').';
+								fetch('/api/v1/ota/cancel', {method: 'POST'}).catch(function(){});
 							}
 						};
 						xhr.onerror = function() {
 							if (!uploadComplete) {
 								uploadBtn.disabled = false;
 								statusEl.textContent = 'Upload failed due to network error.';
+								fetch('/api/v1/ota/cancel', {method: 'POST'}).catch(function(){});
 							}
 						};
 						xhr.send(body);
@@ -2998,6 +3000,17 @@ void setup()
 		request->send( 200, "application/json", "{\"ok\":true}" );
 	} );
 
+	server.on( "/api/v1/ota/cancel", HTTP_POST, []( AsyncWebServerRequest* request ) {
+		if ( otaInProgress )
+		{
+			otaInProgress = false;
+			BLEScan* pBLEScan = BLEDevice::getScan();
+			pBLEScan->start( 0, true, false );
+			Serial.println( "BLE scan restarted after OTA cancel/failure" );
+		}
+		request->send( 200, "application/json", "{\"ok\":true}" );
+	} );
+
 	//	server.onNotFound( handleNotFound );
 
 	_updateServer.setup( &server, "/ota" );
@@ -3114,7 +3127,7 @@ void loop()
 				NumUpdatesAt0 = 0;
 			}
 
-			if (NumUpdatesAt0 > 3)
+			if ( NumUpdatesAt0 > 3 && !otaInProgress )
 			{
 				Serial.println( "No BLE updates for 3 minutes, rebooting" );
 				RebootRequired = true;
@@ -3175,6 +3188,21 @@ void loop()
 		lockCallbacks();
 		OurCallbacks.Check( millis() ); // Check if any of the registered callbacks have timedout
 		unlockCallbacks();
+
+		// Scan health-check: if the BLE scan has silently stopped (NimBLE stack drop)
+		// restart it rather than waiting 3 minutes for the reboot watchdog to fire.
+		if ( !BLECommandConnectInProgress && !otaInProgress )
+		{
+			BLEScan* pBLEScan = BLEDevice::getScan();
+			if ( !pBLEScan->isScanning() )
+			{
+				Serial.println( "BLE scan not running — restarting" );
+				pBLEScan->start( 0, true, false );
+				// Reset zero-update counters so the watchdog doesn't fire on this glitch
+				NumZeroUpdateIntervals = 0;
+				NumUpdatesAt0 = 0;
+			}
+		}
 
 		vTaskDelay( pdMS_TO_TICKS( 1 ) ); // yield to let other tasks run and reduce idle CPU burn on core 1
 	} // end of endless loop ;-)
