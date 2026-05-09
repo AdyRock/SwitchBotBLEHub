@@ -107,6 +107,21 @@ struct SWICHBOT_BULB
 	uint8_t lightState;
 };
 
+struct SWICHBOT_LOCK
+{
+	uint8_t battery;
+	bool calibration;
+	uint8_t status;
+	bool doorOpen;
+	bool updateFromSecondaryLock;
+	bool doubleLockMode;
+	bool unclosedAlarm;
+	bool unlockedAlarm;
+	bool autoLockPaused;
+	bool nightLatch;
+	uint8_t sequence;
+};
+
 struct SWICHBOT_WATERLEAK
 {
 	uint8_t status;
@@ -144,6 +159,7 @@ struct SWITCHBOT
 		struct SWICHBOT_CONTACT Contact;
 		struct SWICHBOT_REMOTE Remote;
 		struct SWICHBOT_BULB Bulb;
+		struct SWICHBOT_LOCK Lock;
 		struct SWICHBOT_BLIND blind;
 		struct SWICHBOT_WATERLEAK WaterLeak;
 		struct SWICHBOT_PLUG Plug;
@@ -167,6 +183,7 @@ class BLE_Device
 	bool parseContac( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseRemote( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseBulb( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
+	bool parseLock( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseIOTH( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parseWaterLeak( BLE_DEVICE& Device, SWITCHBOT& SW_Device );
 	bool parsePlug( BLE_DEVICE& Device, SWITCHBOT& SW_Device );

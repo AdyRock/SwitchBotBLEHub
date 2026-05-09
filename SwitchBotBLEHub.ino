@@ -34,94 +34,380 @@
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.14";
+const char* version = "Hello! SwitchBot BLE Hub V2.15";
+
+struct POST_BODY_BUFFER
+{
+	char* data;
+	size_t len;
+	size_t cap;
+};
+
+static bool IsJsonWhitespace( char c )
+{
+	return ( c == ' ' || c == '\t' || c == '\r' || c == '\n' );
+}
+
+static const char* SkipJsonWhitespace( const char* ptr, const char* end )
+{
+	while ( ptr < end && IsJsonWhitespace( *ptr ) )
+	{
+		ptr++;
+	}
+	return ptr;
+}
+
+static void TrimAsciiInPlace( char* text )
+{
+	if ( text == nullptr )
+	{
+		return;
+	}
+
+	char* start = text;
+	while ( *start != '\0' && IsJsonWhitespace( *start ) )
+	{
+		start++;
+	}
+
+	char* end = start + strlen( start );
+	while ( end > start && IsJsonWhitespace( end[ -1 ] ) )
+	{
+		end--;
+	}
+	*end = '\0';
+
+	if ( start != text )
+	{
+		memmove( text, start, ( size_t )( end - start ) + 1 );
+	}
+}
+
+static void FormatIpAddress( const IPAddress& ip, char* outBuf, size_t outSize )
+{
+	if ( outBuf == nullptr || outSize == 0 )
+	{
+		return;
+	}
+
+	snprintf( outBuf, outSize, "%u.%u.%u.%u", ip[ 0 ], ip[ 1 ], ip[ 2 ], ip[ 3 ] );
+}
+
+static inline void IncrementVolatileU32( volatile uint32_t& value )
+{
+	value = value + 1;
+}
+
+static bool ParseMacAddressToNimble( const char* mac, uint8_t addrType, NimBLEAddress& outAddress )
+{
+	if ( mac == nullptr )
+	{
+		return false;
+	}
+
+	uint8_t bytes[ 6 ];
+	const char* ptr = mac;
+	for ( int i = 0; i < 6; i++ )
+	{
+		int hi = HexNibble( *ptr++ );
+		int lo = HexNibble( *ptr++ );
+		if ( hi < 0 || lo < 0 )
+		{
+			return false;
+		}
+		bytes[ i ] = ( uint8_t )( ( hi << 4 ) | lo );
+		if ( i < 5 )
+		{
+			if ( *ptr != ':' )
+			{
+				return false;
+			}
+			ptr++;
+		}
+	}
+
+	if ( *ptr != '\0' )
+	{
+		return false;
+	}
+
+	uint64_t addressValue =
+	    ( ( uint64_t )bytes[ 0 ] << 40 ) |
+	    ( ( uint64_t )bytes[ 1 ] << 32 ) |
+	    ( ( uint64_t )bytes[ 2 ] << 24 ) |
+	    ( ( uint64_t )bytes[ 3 ] << 16 ) |
+	    ( ( uint64_t )bytes[ 4 ] << 8 ) |
+	    ( ( uint64_t )bytes[ 5 ] );
+	outAddress = NimBLEAddress( addressValue, addrType );
+	return true;
+}
+
+static bool TryFindJsonFieldValue( const uint8_t* data, size_t len, const char* key, const char** valueStart, const char** valueEnd )
+{
+	if ( data == nullptr || len == 0 || key == nullptr || key[ 0 ] == '\0' ||
+	     valueStart == nullptr || valueEnd == nullptr )
+	{
+		return false;
+	}
+
+	const char* body = ( const char* )data;
+	const char* end = body + len;
+	size_t keyLen = strlen( key );
+
+	for ( const char* ptr = body; ptr < end; ptr++ )
+	{
+		if ( *ptr != '"' )
+		{
+			continue;
+		}
+
+		if ( ( size_t )( end - ptr ) < keyLen + 2 )
+		{
+			break;
+		}
+
+		if ( memcmp( ptr + 1, key, keyLen ) != 0 || ptr[ keyLen + 1 ] != '"' )
+		{
+			continue;
+		}
+
+		const char* colon = ptr + keyLen + 2;
+		colon = SkipJsonWhitespace( colon, end );
+		if ( colon >= end || *colon != ':' )
+		{
+			continue;
+		}
+
+		colon++;
+		colon = SkipJsonWhitespace( colon, end );
+		if ( colon >= end )
+		{
+			return false;
+		}
+
+		*valueStart = colon;
+		*valueEnd = end;
+		return true;
+	}
+
+	return false;
+}
+
+static bool CopyRequestArgToBuf( AsyncWebServerRequest* request, const char* name, char* outBuf, size_t outSize, bool trimValue = true, bool lowercase = false )
+{
+	if ( request == nullptr || name == nullptr || outBuf == nullptr || outSize < 2 || !request->hasArg( name ) )
+	{
+		return false;
+	}
+
+	String argValue = request->arg( name );
+	if ( trimValue )
+	{
+		argValue.trim();
+	}
+	if ( lowercase )
+	{
+		argValue.toLowerCase();
+	}
+	if ( argValue.length() == 0 )
+	{
+		outBuf[ 0 ] = '\0';
+		return false;
+	}
+
+	strncpy( outBuf, argValue.c_str(), outSize - 1 );
+	outBuf[ outSize - 1 ] = '\0';
+	return true;
+}
 
 // Extract JSON string field into a fixed char buffer (no String allocation)
 static bool TryGetJsonStringFieldIntoBuf( const uint8_t* data, size_t len, const char* key, char* outBuf, size_t maxLen )
 {
-	if ( !outBuf || maxLen < 2 )
+	if ( outBuf == nullptr || maxLen < 2 )
+	{
 		return false;
+	}
 	outBuf[ 0 ] = '\0';
 
-	String temp;
-	if ( !TryGetJsonStringField( data, len, key, temp ) )
-		return false;
-
-	if ( temp.length() == 0 )
-		return false;
-
-	strncpy( outBuf, temp.c_str(), maxLen - 1 );
-	outBuf[ maxLen - 1 ] = '\0';
-	return true;
-}
-
-static bool TryGetJsonStringField( const uint8_t* data, size_t len, const char* key, String& value )
-{
-	value = "";
-	if ( data == nullptr || len == 0 || key == nullptr || key[ 0 ] == '\0' )
+	const char* valueStart = nullptr;
+	const char* end = nullptr;
+	if ( !TryFindJsonFieldValue( data, len, key, &valueStart, &end ) )
 	{
 		return false;
 	}
 
-	String body;
-	body.reserve( len );
-	for ( size_t i = 0; i < len; i++ )
-	{
-		body += ( char )data[ i ];
-	}
-
-	const String keyToken = String( "\"" ) + key + "\"";
-	int keyPos = body.indexOf( keyToken );
-	if ( keyPos < 0 )
+	if ( valueStart >= end || *valueStart != '"' )
 	{
 		return false;
 	}
 
-	int colonPos = body.indexOf( ':', keyPos + keyToken.length() );
-	if ( colonPos < 0 )
+	valueStart++;
+	size_t outPos = 0;
+	for ( const char* ptr = valueStart; ptr < end; ptr++ )
 	{
-		return false;
-	}
+		char c = *ptr;
+		if ( c == '"' )
+		{
+			outBuf[ outPos ] = '\0';
+			return ( outPos > 0 );
+		}
 
-	int quoteStart = body.indexOf( '"', colonPos + 1 );
-	if ( quoteStart < 0 )
-	{
-		return false;
-	}
+		if ( c == '\\' )
+		{
+			ptr++;
+			if ( ptr >= end )
+			{
+				return false;
+			}
 
-	int quoteEnd = quoteStart + 1;
-	while ( quoteEnd < body.length() )
-	{
-		if ( body[ quoteEnd ] == '"' && body[ quoteEnd - 1 ] != '\\' )
+			switch ( *ptr )
+			{
+			case '"': c = '"'; break;
+			case '\\': c = '\\'; break;
+			case '/': c = '/'; break;
+			case 'b': c = '\b'; break;
+			case 'f': c = '\f'; break;
+			case 'n': c = '\n'; break;
+			case 'r': c = '\r'; break;
+			case 't': c = '\t'; break;
+			default: c = *ptr; break;
+			}
+		}
+
+		if ( outPos + 1 >= maxLen )
 		{
 			break;
 		}
-		quoteEnd++;
-	}
-	if ( quoteEnd >= body.length() )
-	{
-		return false;
+		outBuf[ outPos++ ] = c;
 	}
 
-	value = body.substring( quoteStart + 1, quoteEnd );
-	value.replace( "\\\"", "\"" );
-	value.replace( "\\\\", "\\" );
-	return true;
+	outBuf[ outPos ] = '\0';
+	return false;
 }
 
-static bool ParseNumericByteToken( const String& rawToken, uint8_t& outByte )
+static int HexNibble( char c )
 {
-	// Use const char* instead of String token to avoid allocation
-	const char* token = rawToken.c_str();
-	// Trim whitespace from the start
-	while ( *token == ' ' || *token == '\t' || *token == '\r' || *token == '\n' )
-		token++;
-	if ( *token == '\0' )
+	if ( c >= '0' && c <= '9' ) return c - '0';
+	if ( c >= 'a' && c <= 'f' ) return 10 + ( c - 'a' );
+	if ( c >= 'A' && c <= 'F' ) return 10 + ( c - 'A' );
+	return -1;
+}
+
+static void UrlDecodeInPlace( char* text )
+{
+	if ( text == nullptr )
+	{
+		return;
+	}
+
+	char* src = text;
+	char* dst = text;
+	while ( *src )
+	{
+		if ( *src == '+' )
+		{
+			*dst++ = ' ';
+			src++;
+			continue;
+		}
+
+		if ( *src == '%' && src[ 1 ] && src[ 2 ] )
+		{
+			int hi = HexNibble( src[ 1 ] );
+			int lo = HexNibble( src[ 2 ] );
+			if ( hi >= 0 && lo >= 0 )
+			{
+				*dst++ = ( char )( ( hi << 4 ) | lo );
+				src += 3;
+				continue;
+			}
+		}
+
+		*dst++ = *src++;
+	}
+	*dst = '\0';
+}
+
+static bool TryExtractUriFromBody( const uint8_t* data, size_t len, char* outBuf, size_t maxLen )
+{
+	if ( outBuf == nullptr || maxLen < 2 || data == nullptr || len == 0 )
+	{
+		return false;
+	}
+	outBuf[ 0 ] = '\0';
+
+	// Preferred format: JSON body {"uri":"..."}
+	if ( TryGetJsonStringFieldIntoBuf( data, len, "uri", outBuf, maxLen ) )
+	{
+		return true;
+	}
+
+	size_t copyLen = 0;
+	while ( copyLen < len && copyLen + 1 < maxLen && data[ copyLen ] != '\0' )
+	{
+		outBuf[ copyLen ] = ( char )data[ copyLen ];
+		copyLen++;
+	}
+	outBuf[ copyLen ] = '\0';
+	TrimAsciiInPlace( outBuf );
+	if ( outBuf[ 0 ] == '\0' )
 	{
 		return false;
 	}
 
-const char* start = token;
+	// Backward-compatible format: uri=http%3A%2F%2F...
+	char* uriPos = strstr( outBuf, "uri=" );
+	if ( uriPos != nullptr )
+	{
+		uriPos += 4;
+		char* amp = strchr( uriPos, '&' );
+		if ( amp != nullptr )
+		{
+			*amp = '\0';
+		}
+		TrimAsciiInPlace( uriPos );
+		if ( uriPos[ 0 ] != '\0' )
+		{
+			if ( uriPos != outBuf )
+			{
+				memmove( outBuf, uriPos, strlen( uriPos ) + 1 );
+			}
+			UrlDecodeInPlace( outBuf );
+			return outBuf[ 0 ] != '\0';
+		}
+	}
+
+	// Plain-text fallback body: http://...
+	UrlDecodeInPlace( outBuf );
+	return outBuf[ 0 ] != '\0';
+}
+
+static bool ParseNumericByteToken( const char* token, size_t tokenLen, uint8_t& outByte )
+{
+	if ( token == nullptr || tokenLen == 0 )
+	{
+		return false;
+	}
+
+	while ( tokenLen > 0 && IsJsonWhitespace( *token ) )
+	{
+		token++;
+		tokenLen--;
+	}
+	while ( tokenLen > 0 && IsJsonWhitespace( token[ tokenLen - 1 ] ) )
+	{
+		tokenLen--;
+	}
+	if ( tokenLen == 0 || tokenLen >= 32 )
+	{
+		return false;
+	}
+
+	char tokenBuf[ 32 ];
+	memcpy( tokenBuf, token, tokenLen );
+	tokenBuf[ tokenLen ] = '\0';
+
+	const char* start = tokenBuf;
 	char* end = nullptr;
 	double number = strtod( start, &end );
 	if ( end == start )
@@ -155,188 +441,124 @@ const char* start = token;
 	return true;
 }
 
-static bool TryGetJsonByteArrayField( const uint8_t* data, size_t len, const char* key, String& value )
-{
-	value = "";
-	if ( data == nullptr || len == 0 || key == nullptr || key[ 0 ] == '\0' )
-	{
-		return false;
-	}
-
-	String body;
-	body.reserve( len );
-	for ( size_t i = 0; i < len; i++ )
-	{
-		body += ( char )data[ i ];
-	}
-
-	const String keyToken = String( "\"" ) + key + "\"";
-	int keyPos = body.indexOf( keyToken );
-	if ( keyPos < 0 )
-	{
-		return false;
-	}
-
-	int colonPos = body.indexOf( ':', keyPos + keyToken.length() );
-	if ( colonPos < 0 )
-	{
-		return false;
-	}
-
-	int pos = colonPos + 1;
-	while ( pos < body.length() && ( body[ pos ] == ' ' || body[ pos ] == '\t' || body[ pos ] == '\r' || body[ pos ] == '\n' ) )
-	{
-		pos++;
-	}
-
-	if ( pos >= body.length() )
-	{
-		return false;
-	}
-
-	if ( body[ pos ] == '"' )
-	{
-		String stringValue;
-		if ( !TryGetJsonStringField( data, len, key, stringValue ) )
-		{
-			return false;
-		}
-
-		stringValue.trim();
-		if ( stringValue.length() == 0 )
-		{
-			return false;
-		}
-
-		if ( stringValue[ 0 ] == '[' )
-		{
-			value = stringValue;
-		}
-		else
-		{
-			value = "[" + stringValue + "]";
-		}
-		return true;
-	}
-
-	if ( body[ pos ] != '[' )
-	{
-		return false;
-	}
-
-	int endPos = pos;
-	while ( endPos < body.length() && body[ endPos ] != ']' )
-	{
-		endPos++;
-	}
-	if ( endPos >= body.length() )
-	{
-		return false;
-	}
-
-	String list = body.substring( pos, endPos + 1 );
-	String normalized = "[";
-	int listPos = 1;
-	bool added = false;
-	while ( listPos < list.length() )
-	{
-		while ( listPos < list.length() && ( list[ listPos ] == ' ' || list[ listPos ] == '\t' || list[ listPos ] == ',' ) )
-		{
-			listPos++;
-		}
-
-		if ( listPos >= list.length() || list[ listPos ] == ']' )
-		{
-			break;
-		}
-
-		int valueStart = listPos;
-		while ( listPos < list.length() && list[ listPos ] != ',' && list[ listPos ] != ']' )
-		{
-			listPos++;
-		}
-
-		if ( valueStart == listPos )
-		{
-			return false;
-		}
-
-		uint8_t byteValue = 0;
-		if ( !ParseNumericByteToken( list.substring( valueStart, listPos ), byteValue ) )
-		{
-			return false;
-		}
-
-		if ( added )
-		{
-			normalized += ",";
-		}
-		normalized += String( ( unsigned int )byteValue );
-		added = true;
-	}
-
-	if ( !added )
-	{
-		return false;
-	}
-
-	normalized += "]";
-	value = normalized;
-	return true;
-}
-
-static bool ParseByteListString( const String& value, uint8_t* outData, uint8_t maxLen, uint8_t& outLen )
+static bool ParseByteListString( const char* value, uint8_t* outData, uint8_t maxLen, uint8_t& outLen )
 {
 	outLen = 0;
-	if ( outData == nullptr || maxLen == 0 )
+	if ( value == nullptr || outData == nullptr || maxLen == 0 )
 	{
 		return false;
 	}
 
-	if ( value.length() < 3 || value[ 0 ] != '[' || value[ value.length() - 1 ] != ']' )
+	size_t valueLen = strlen( value );
+	if ( valueLen < 3 || value[ 0 ] != '[' || value[ valueLen - 1 ] != ']' )
 	{
 		return false;
 	}
 
-	int pos = 1;
-	while ( pos < value.length() - 1 )
+	const char* ptr = value + 1;
+	const char* end = value + valueLen - 1;
+	while ( ptr < end )
 	{
-		while ( pos < value.length() - 1 && ( value[ pos ] == ' ' || value[ pos ] == '\t' || value[ pos ] == ',' ) )
+		while ( ptr < end && ( IsJsonWhitespace( *ptr ) || *ptr == ',' ) )
 		{
-			pos++;
+			ptr++;
 		}
 
-		if ( pos >= value.length() - 1 )
+		if ( ptr >= end )
 		{
 			break;
 		}
 
-		int start = pos;
-		while ( pos < value.length() - 1 && value[ pos ] != ',' && value[ pos ] != ']' )
+		const char* tokenStart = ptr;
+		while ( ptr < end && *ptr != ',' && *ptr != ']' )
 		{
-			pos++;
+			ptr++;
 		}
 
-		if ( start == pos )
-		{
-			return false;
-		}
-
-		if ( outLen >= maxLen )
+		if ( tokenStart == ptr || outLen >= maxLen )
 		{
 			return false;
 		}
 
 		uint8_t byteValue = 0;
-		if ( !ParseNumericByteToken( value.substring( start, pos ), byteValue ) )
+		if ( !ParseNumericByteToken( tokenStart, ( size_t )( ptr - tokenStart ), byteValue ) )
 		{
 			return false;
 		}
-
 		outData[ outLen++ ] = byteValue;
 	}
 
 	return ( outLen > 0 );
+}
+
+static bool TryParseJsonByteArrayField( const uint8_t* data, size_t len, const char* key, uint8_t* outData, uint8_t maxLen, uint8_t& outLen )
+{
+	outLen = 0;
+	if ( data == nullptr || len == 0 || key == nullptr || key[ 0 ] == '\0' || outData == nullptr || maxLen == 0 )
+	{
+		return false;
+	}
+
+	const char* valueStart = nullptr;
+	const char* end = nullptr;
+	if ( !TryFindJsonFieldValue( data, len, key, &valueStart, &end ) )
+	{
+		return false;
+	}
+
+	if ( valueStart >= end )
+	{
+		return false;
+	}
+
+	if ( *valueStart == '"' )
+	{
+		char valueBuf[ 128 ];
+		if ( !TryGetJsonStringFieldIntoBuf( data, len, key, valueBuf, sizeof( valueBuf ) ) )
+		{
+			return false;
+		}
+		TrimAsciiInPlace( valueBuf );
+		if ( valueBuf[ 0 ] == '\0' )
+		{
+			return false;
+		}
+		if ( valueBuf[ 0 ] != '[' )
+		{
+			char wrapped[ sizeof( valueBuf ) ];
+			if ( snprintf( wrapped, sizeof( wrapped ), "[%s]", valueBuf ) >= ( int )sizeof( wrapped ) )
+			{
+				return false;
+			}
+			return ParseByteListString( wrapped, outData, maxLen, outLen );
+		}
+		return ParseByteListString( valueBuf, outData, maxLen, outLen );
+	}
+
+	if ( *valueStart != '[' )
+	{
+		return false;
+	}
+
+	const char* listEnd = valueStart;
+	while ( listEnd < end && *listEnd != ']' )
+	{
+		listEnd++;
+	}
+	if ( listEnd >= end )
+	{
+		return false;
+	}
+
+	char listBuf[ 128 ];
+	size_t listLen = ( size_t )( listEnd - valueStart + 1 );
+	if ( listLen >= sizeof( listBuf ) )
+	{
+		return false;
+	}
+	memcpy( listBuf, valueStart, listLen );
+	listBuf[ listLen ] = '\0';
+	return ParseByteListString( listBuf, outData, maxLen, outLen );
 }
 
 static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
@@ -361,7 +583,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
     <div class="wrap">
       <div class="card">
         <h1>SwitchBot BLE Hub</h1>
-        <p class="ver">Version 2.14</p>
+        <p class="ver">Version 2.15</p>
         <div class="links">
           <a class="btn" href="/update">Update firmware</a>
 					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
@@ -568,6 +790,11 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			.home { text-decoration: none; background: #3c3c3c; color: #fff; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; }
 			.home:hover { background: #555; }
 			.meta { color: #9aa0a6; font-size: 0.85rem; margin-bottom: 0.9rem; }
+			.controls { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; }
+			.scan-btn { background: #2f8f5b; color: #fff; border: 1px solid #3ea96c; border-radius: 6px; padding: 0.38rem 0.7rem; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+			.scan-btn:hover { background: #3ea96c; }
+			.scan-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+			.scan-status { color: #9aa0a6; font-size: 0.82rem; }
 			.blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0.85rem; }
 			.block { background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 0.85rem; }
 			.block h2 { margin: 0 0 0.6rem; color: #9cdcfe; font-size: 1.05rem; }
@@ -590,6 +817,8 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			.unknown-table th, .unknown-table td { border-bottom: 1px solid #3c3c3c; padding: 0.45rem 0.5rem; text-align: left; }
 			.unknown-table th { color: #9cdcfe; font-weight: 600; }
 			.unknown-empty { color: #9aa0a6; font-size: 0.85rem; }
+			.raw-link { display: inline-block; padding: 0.2rem 0.45rem; border-radius: 4px; background: #2f8f5b; color: #fff; text-decoration: none; font-size: 0.75rem; font-weight: 600; }
+			.raw-link:hover { background: #3ea96c; }
 			.section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin: 0 0 0.6rem; }
 			.section-head h2 { margin: 0; }
 			.clear-btn { background: #3c3c3c; color: #fff; border: 1px solid #555; border-radius: 6px; padding: 0.3rem 0.55rem; font-size: 0.78rem; cursor: pointer; }
@@ -603,6 +832,10 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				<a class="home" href="/">Home</a>
 			</div>
 			<div id="meta" class="meta">Loading...</div>
+			<div class="controls">
+				<button id="scanToggleBtn" class="scan-btn" type="button" onclick="toggleBleScan()">Start BLE Scan</button>
+				<span id="scanStatus" class="scan-status">Scanner status: unknown</span>
+			</div>
 			<div class="blocks">
 				<section class="block">
 					<h2>BLE Stats</h2>
@@ -643,6 +876,7 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			var statsLastRequestStartedMs = 0;
 			var statsErrorText = "";
 			var statsErrorUntilMs = 0;
+			var scanControlBusy = false;
 
 			window.getStatsDebug = function() {
 				return {
@@ -698,9 +932,57 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				document.getElementById("meta").textContent = "Updated: " + new Date().toLocaleTimeString() + " | Next update: " + getStatsRemainingSeconds() + "s";
 			}
 
+			function updateScanControls(s) {
+				var btn = document.getElementById("scanToggleBtn");
+				var status = document.getElementById("scanStatus");
+				if (!btn || !status) return;
+
+				var scanning = !!(s && s.bleScanning);
+				var pausedByUser = !!(s && s.scanPausedByUser);
+
+				if (pausedByUser) {
+					status.textContent = "Scanner status: paused by user";
+					btn.textContent = "Start BLE Scan";
+				} else if (scanning) {
+					status.textContent = "Scanner status: running";
+					btn.textContent = "Stop BLE Scan";
+				} else {
+					status.textContent = "Scanner status: not running";
+					btn.textContent = "Start BLE Scan";
+				}
+
+				btn.disabled = scanControlBusy;
+			}
+
+			function toggleBleScan() {
+				if (scanControlBusy || !lastStats) return;
+				var action = (lastStats.scanPausedByUser || !lastStats.bleScanning) ? "start" : "stop";
+				scanControlBusy = true;
+				updateScanControls(lastStats);
+				fetch('/api/v1/scan/control?action=' + encodeURIComponent(action), { method: 'POST' })
+					.then(function(r) {
+						if (!r.ok) throw new Error('HTTP ' + r.status);
+						return r.json();
+					})
+					.then(function() {
+						resetStatsPolling();
+						loadStats();
+					})
+					.catch(function(e) {
+						statsErrorText = String(e);
+						statsErrorUntilMs = Date.now() + 10000;
+						updateStatsMeta();
+					})
+					.finally(function() {
+						scanControlBusy = false;
+						if (lastStats) updateScanControls(lastStats);
+					});
+			}
+
 			function render(s) {
 				var ble = "";
 				ble += mkStat("Registered devices", s.registeredDevices || 0, null, "Number of known SwitchBot devices currently registered (max 50).");
+				ble += mkStat("Scan mode", (s.scanPausedByUser ? "Manual Pause" : "Auto") + " | " + (s.bleScanning ? "Running" : "Stopped"), null, "Manual Pause means scan was stopped from the UI. Auto means firmware controls scanning health/restarts.");
 				ble += mkStat("Adverts/min", s.advertsSeenPerMinute || 0, "openAdvertsHistory", "Total BLE advertisements seen per minute. Click to view recent history.");
 				ble += mkStat("UUID match/min", s.matchedServiceDataPerMinute || 0, null, "Advertisements per minute matching supported SwitchBot service UUIDs.");
 				ble += mkStat("Empty payload/min", s.matchedEmptyPayloadPerMinute || 0, null, "Matched advertisements per minute that had no service payload data.");
@@ -715,8 +997,19 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				mem += mkStat("Largest block", s.largestHeapBlock || 0, null, "Size in bytes of the largest currently available contiguous heap block.");
 				mem += mkStat("CPU usage", (s.cpuUsage || 0) + "%", null, "Estimated CPU busy percentage sampled over the last stats interval.");
 				mem += mkStat("Uptime (D, HH:MM:SS)", formatUptime(s.uptimeMs || 0), null, "Time since the hub last booted.");
+				mem += mkStat("Diag: Scan callbacks", s.diagScanOnResultCalls || 0, null, "Total BLE advertisement callback invocations since boot.");
+				mem += mkStat("Diag: Last restart age", (s.lastSuccessfulScanRestartAtMs ? formatUptime(Math.max(0, (s.uptimeMs || 0) - s.lastSuccessfulScanRestartAtMs)) : "never"), null, "Elapsed time since the last scan restart that reported the scanner running.");
+				mem += mkStat("Diag: Last mem-recovery age", (s.lastMemoryScanRecoveryAtMs ? formatUptime(Math.max(0, (s.uptimeMs || 0) - s.lastMemoryScanRecoveryAtMs)) : "never"), null, "Elapsed time since the last automatic memory-fragmentation scan recovery cycle.");
+				mem += mkStat("Diag: Scan restarts", s.diagScanRestartCount || 0, null, "Total scanner restarts (health + stale recovery).");
+				mem += mkStat("Diag: Restart cooldown skips", s.diagScanRestartSuppressedCount || 0, null, "Auto-restart attempts skipped because the scanner restart cooldown window was still active.");
+				mem += mkStat("Diag: Stale recoveries", s.diagScanStaleRecoveryCount || 0, null, "Number of stale-scan recovery cycles performed.");
+				mem += mkStat("Diag: Mem recoveries", s.diagScanMemoryRecoveryCount || 0, null, "Automatic scan recoveries triggered when largest free heap block drops below the fragmentation threshold.");
+				mem += mkStat("Diag: Raw packets", (s.diagRawPacketsBuilt || 0) + "/" + (s.diagRawPacketsSent || 0), null, "Raw packet stream payloads built/sent.");
+				mem += mkStat("Diag: Push posts", (s.diagPushPostCount || 0) + " (err " + (s.diagPushPostErrorCount || 0) + ")", null, "Callback POST attempts and failures.");
+				mem += mkStat("Diag: API hits", "stats " + (s.diagStatsRequests || 0) + " | devices " + (s.diagDevicesRequests || 0), null, "Total /api/v1/stats and /api/v1/devices requests since boot.");
 				document.getElementById("memStats").innerHTML = mem;
 				renderUnknownTypes(s.unknownTypes || []);
+				updateScanControls(s);
 
 				updateStatsMeta();
 			}
@@ -781,13 +1074,18 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				h += '<th' + thStyle('type') + '>Sub-type (Hex)' + sortArrow('type') + '</th>';
 				h += '<th' + thStyle('mac') + '>MAC' + sortArrow('mac') + '</th>';
 				h += '<th' + thStyle('count') + '>BLE Updates' + sortArrow('count') + '</th>';
+				h += '<th>Raw Viewer</th>';
 				h += '</tr></thead><tbody>';
 				for (var i = 0; i < sorted.length; i++) {
 					var t = Number(sorted[i].type || 0) & 0xFF;
 					var c = Number(sorted[i].count || 0);
 					var sub = sorted[i].subtype ? sorted[i].subtype : '-';
 					var mac = sorted[i].mac ? sorted[i].mac : '-';
-					h += '<tr><td>' + typeHex(t) + '</td><td>' + typeChar(t) + '</td><td>' + sub + '</td><td>' + mac + '</td><td>' + c + '</td></tr>';
+					var rawLink = '-';
+					if (mac !== '-') {
+						rawLink = '<a class="raw-link" href="/api/v1/device/viewer?address=' + encodeURIComponent(mac) + '">View Raw</a>';
+					}
+					h += '<tr><td>' + typeHex(t) + '</td><td>' + typeChar(t) + '</td><td>' + sub + '</td><td>' + mac + '</td><td>' + c + '</td><td>' + rawLink + '</td></tr>';
 				}
 				h += '</tbody></table>';
 				host.innerHTML = h;
@@ -854,6 +1152,17 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				loadHistoryChart();
 			}
 
+			function formatSpanLabel(ms) {
+				var s = Math.round((ms || 0) / 1000);
+				if (s < 60) return s + "s";
+				var m = Math.round(s / 60);
+				if (m < 60) return m + "m";
+				var h = Math.round(m / 60);
+				if (h < 24) return h + "h";
+				var d = Math.round(h / 24);
+				return d + "d";
+			}
+
 			function drawHistoryChart(values, intervalMs) {
 				var canvas = document.getElementById("heapHistoryCanvas");
 				var meta = document.getElementById("heapHistoryMeta");
@@ -884,9 +1193,11 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 					maxV = maxV + 1;
 				}
 
-				var padL = 44, padR = 16, padT = 12, padB = 26;
+				var padL = 44, padR = 16, padT = 12, padB = 40;
 				var plotW = Math.max(1, cssW - padL - padR);
 				var plotH = Math.max(1, cssH - padT - padB);
+				var spanMs = intervalMs * (values.length - 1);
+				var xTicks = 4;
 
 				ctx.strokeStyle = "#333";
 				ctx.lineWidth = 1;
@@ -895,6 +1206,15 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 					ctx.beginPath();
 					ctx.moveTo(padL, y);
 					ctx.lineTo(padL + plotW, y);
+					ctx.stroke();
+				}
+
+				ctx.strokeStyle = "#2b2b2b";
+				for (var gx = 0; gx <= xTicks; gx++) {
+					var xg = padL + (plotW * gx / xTicks);
+					ctx.beginPath();
+					ctx.moveTo(xg, padT);
+					ctx.lineTo(xg, padT + plotH);
 					ctx.stroke();
 				}
 
@@ -914,7 +1234,16 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				ctx.fillText(String(maxV), 6, padT + 4);
 				ctx.fillText(String(minV), 6, padT + plotH + 4);
 
-				var spanMs = intervalMs * (values.length - 1);
+				ctx.textAlign = "center";
+				for (var tx = 0; tx <= xTicks; tx++) {
+					var frac = tx / xTicks;
+					var x = padL + (plotW * frac);
+					var ageMs = Math.round((1 - frac) * spanMs);
+					var label = (tx === xTicks) ? "now" : ("-" + formatSpanLabel(ageMs));
+					ctx.fillText(label, x, padT + plotH + 18);
+				}
+				ctx.textAlign = "start";
+
 				var spanHours = (spanMs / 3600000).toFixed(1);
 				var latest = values[values.length - 1];
 				var units = (chartConfig && chartConfig.units) ? (" " + chartConfig.units) : "";
@@ -1176,6 +1505,8 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
 			.q-fair { color: #f8d37a; border-color: #8f7a2f; }
 			.q-acceptable { color: #f0b57a; border-color: #8f5f2f; }
 			.q-poor { color: #f29a9a; border-color: #8f2f2f; }
+			.view-raw-btn { background: #4ec94e; color: #1e1e1e; border: none; border-radius: 4px; padding: 0.25rem 0.5rem; cursor: pointer; font-size: 0.8rem; font-weight: 600; text-decoration: none; display: inline-block; }
+			.view-raw-btn:hover { background: #5fd95f; }
 			#heapHistoryModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 20; }
 			#heapHistoryDialog { width: min(940px, 95vw); background: #252526; border: 1px solid #3c3c3c; border-radius: 10px; padding: 0.9rem; }
 			#heapHistoryHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem; }
@@ -1215,6 +1546,11 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
       var groups = {};
       var sortPrefs = {};
 			var lastHeapHistory = null;
+			var devicesLoadInFlight = false;
+			var devicesLoadQueued = false;
+			var devicesLoadTimer = null;
+			var lastDevicesLoadAt = 0;
+			var minDevicesLoadIntervalMs = 1000;
 
 			function closeFreeHeapHistory() {
 				document.getElementById("heapHistoryModal").style.display = "none";
@@ -1325,6 +1661,15 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
       function flatten(d) {
         var o = { address: d.address, rssi: d.rssi };
         var s = d.serviceData || {};
+				var model = s.model;
+				if (typeof model === "string" && model.length > 0) {
+					var modelCode = model.charCodeAt(0);
+					o.modelType = (modelCode >= 32 && modelCode <= 126)
+						? model
+						: ("0x" + modelCode.toString(16).toUpperCase().padStart(2, "0"));
+				} else if (typeof model === "number") {
+					o.modelType = "0x" + model.toString(16).toUpperCase().padStart(2, "0");
+				}
         Object.keys(s).forEach(function(k) {
           if (k === "model") return;
           var v = s[k];
@@ -1340,7 +1685,7 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
       function buildCols(rows) {
         var seen = {};
         rows.forEach(function(r) { Object.keys(r).forEach(function(k) { seen[k] = true; }); });
-        var fixed = ["address", "rssi"];
+				var fixed = ["address", "modelType", "rssi"];
         var rest = Object.keys(seen).filter(function(k) { return fixed.indexOf(k) < 0 && k !== "modelName"; }).sort();
         return fixed.concat(rest);
       }
@@ -1362,6 +1707,7 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
           var arrow = g.sortCol === i ? (g.sortAsc ? " &#9650;" : " &#9660;") : "";
           h += '<th onclick="sortGroup(\'' + name + '\',' + i + ')">' + c.replace(/_/g, " ") + arrow + "</th>";
         });
+        h += '<th>Action</th>';
         h += "</tr></thead><tbody>";
         g.rows.forEach(function(r) {
           h += "<tr>";
@@ -1378,6 +1724,7 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
               h += "<td>" + v + "</td>";
             }
           });
+          h += '<td><a class="view-raw-btn" href="/api/v1/device/viewer?address=' + encodeURIComponent(r.address) + '">View Raw</a></td>';
           h += "</tr>";
         });
         h += "</tbody></table>";
@@ -1413,12 +1760,41 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
         render();
       }
 
+      function scheduleLoad() {
+				if (devicesLoadInFlight) {
+					devicesLoadQueued = true;
+					return;
+				}
+				if (devicesLoadTimer !== null) {
+					devicesLoadQueued = true;
+					return;
+				}
+				var now = Date.now();
+				var wait = Math.max(0, minDevicesLoadIntervalMs - (now - lastDevicesLoadAt));
+				devicesLoadTimer = setTimeout(function() {
+					devicesLoadTimer = null;
+					load();
+				}, wait);
+			}
+
       function load() {
+				if (devicesLoadInFlight) {
+					devicesLoadQueued = true;
+					return;
+				}
+				devicesLoadInFlight = true;
+				lastDevicesLoadAt = Date.now();
         fetch("/api/v1/devices", { headers: { Accept: "application/json" } })
-          .then(function(r) { return r.json(); })
+					.then(function(r) {
+						if (!r.ok) {
+							throw new Error("HTTP " + r.status + " " + r.statusText);
+						}
+						return r.json();
+					})
           .then(function(data) {
+					var list = Array.isArray(data) ? data : (data && typeof data === "object" ? [data] : []);
             groups = {};
-            data.forEach(function(d) {
+					list.forEach(function(d) {
               var f = flatten(d);
               var name = f.modelName || "Unknown";
               if (!groups[name]) {
@@ -1441,14 +1817,22 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
             document.getElementById("ts").textContent = "Updated: " + new Date().toLocaleTimeString();
           })
           .catch(function(e) {
+						document.getElementById("ts").textContent = "Error: " + e;
             document.getElementById("tbl").innerHTML = "<p style=color:red>Error: " + e + "</p>";
+					})
+					.finally(function() {
+						devicesLoadInFlight = false;
+						if (devicesLoadQueued) {
+							devicesLoadQueued = false;
+							scheduleLoad();
+						}
           });
       }
 
-			load();
+			scheduleLoad();
 
       var es = new EventSource("/api/v1/events");
-			es.addEventListener("ble", function() { load(); });
+			es.addEventListener("ble", function() { scheduleLoad(); });
       es.onopen = function() {
         document.getElementById("live").style.color = "#4ec94e";
         document.getElementById("live").textContent = "\u25cf live";
@@ -1457,6 +1841,9 @@ static const char DEVICES_TABLE_HTML[] PROGMEM = R"HTMLEOF(
         document.getElementById("live").style.color = "#e05252";
         document.getElementById("live").textContent = "\u25cf disconnected";
       };
+			window.addEventListener("beforeunload", function() {
+				es.close();
+			});
     </script>
   </body>
 </html>
@@ -1677,10 +2064,430 @@ static const char HOMEY_MONITOR_HTML[] PROGMEM = R"HTMLEOF(
 </html>
 )HTMLEOF";
 
+static const char RAW_PACKET_VIEWER_HTML[] PROGMEM = R"HTMLEOF(
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Raw BLE Packet Viewer</title>
+		<style>
+			body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; margin: 1rem 2rem; }
+			.top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+			h1 { color: #9cdcfe; margin: 0; font-size: 1.4rem; }
+			.back { text-decoration: none; background: #3c3c3c; color: #fff; border: none; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; cursor: pointer; font-size: 1rem; }
+			.back:hover { background: #555; }
+			.clear-btn { background: #5a3030; color: #f29a9a; border: none; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+			.clear-btn:hover { background: #6e3535; }
+			.copy-btn { background: #2d4f2d; color: #9ef59e; border: none; border-radius: 6px; padding: 0.45rem 0.7rem; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+			.copy-btn:hover { background: #356035; }
+			.top-right { display: flex; align-items: center; gap: 0.6rem; }
+			.info { background: #252526; border: 1px solid #3c3c3c; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+			.info-row { margin: 0.5rem 0; }
+			.info-label { color: #9cdcfe; font-weight: bold; }
+			.info-value { color: #d4d4d4; margin-left: 0.5rem; }
+			.section { background: #252526; border: 1px solid #3c3c3c; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+			.section-title { color: #9cdcfe; font-weight: bold; font-size: 1.05rem; margin-bottom: 0.8rem; border-bottom: 2px solid #3c3c3c; padding-bottom: 0.5rem; }
+			.history-table { width: 100%; border-collapse: collapse; }
+			.history-table th { color: #9cdcfe; text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #3c3c3c; font-size: 0.85rem; white-space: nowrap; }
+			.history-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #2a2a2a; font-size: 0.9rem; vertical-align: middle; word-break: break-all; }
+			.history-table tr:first-child td { background: #1e2a1e; }
+			.history-table tr:hover td { background: #2d2d2d; }
+			.time-col { color: #888; white-space: nowrap; width: 6em; }
+			.rssi-col { color: #888; white-space: nowrap; width: 5em; }
+			.state-col { white-space: nowrap; min-width: 10em; }
+			.bits-col { white-space: nowrap; min-width: 14em; }
+			.notes-col { min-width: 12em; }
+			.byte-value { color: #9ef59e; font-weight: bold; cursor: pointer; }
+			.byte-value:hover { text-decoration: underline; opacity: 0.85; }
+			.byte-value-changed { color: #000; background: #f8d37a; font-weight: bold; padding: 0.1rem 0.25rem; border-radius: 3px; cursor: pointer; }
+			.byte-value-changed:hover { opacity: 0.8; }
+			.byte-selected { outline: 2px solid #9cdcfe; border-radius: 3px; }
+			.byte-separator { color: #555; }
+			.dash-separator { color: #666; padding: 0 0.4rem; }
+			.bit-label { color: #666; font-size: 0.78rem; margin-right: 0.35rem; }
+			.bit-normal { color: #9ef59e; font-weight: bold; letter-spacing: 0.05rem; }
+			.bit-changed { color: #000; background: #f8d37a; font-weight: bold; padding: 0.05rem 0.15rem; border-radius: 2px; letter-spacing: 0; }
+			.bit-gap { margin: 0 0.25rem; color: #444; }
+			.state-value { color: #9ef59e; font-weight: bold; }
+			.state-changed { color: #000; background: #f8d37a; font-weight: bold; padding: 0.1rem 0.25rem; border-radius: 3px; }
+			.note-input { width: 100%; min-width: 10em; box-sizing: border-box; padding: 0.25rem 0.35rem; border-radius: 4px; border: 1px solid #444; background: #1a1a1a; color: #d4d4d4; }
+			.note-input:focus { outline: 2px solid #9cdcfe; border-color: #9cdcfe; }
+			.no-data { color: #888; font-style: italic; }
+			.error { color: #f29a9a; }
+			.live { color: #4ec94e; font-weight: bold; }
+			.empty-row { color: #888; font-style: italic; padding: 1rem; }
+		</style>
+	</head>
+	<body>
+		<div class="top">
+			<h1>Raw BLE Packet Viewer</h1>
+			<div class="top-right">
+				<button class="copy-btn" onclick="copyTableToClipboard()">Copy Table</button>
+				<button class="clear-btn" onclick="clearHistory()">Clear</button>
+				<button class="back" onclick="goBackAndClear()">&#8592; Back to Devices</button>
+			</div>
+		</div>
+
+		<div class="info">
+			<div class="info-row">
+				<span class="info-label">Device Address:</span>
+				<span class="info-value" id="deviceAddress">-</span>
+			</div>
+			<div class="info-row">
+				<span class="info-label">RSSI:</span>
+				<span class="info-value" id="deviceRssi">-</span>
+			</div>
+			<div class="info-row">
+				<span class="info-label">Last Update:</span>
+				<span class="info-value" id="lastUpdate">-</span>
+			</div>
+			<div class="info-row">
+				<span class="info-label">Status:</span>
+				<span class="info-value" id="status">
+					<span class="live">&#9679; Live</span> - Waiting for packets...
+				</span>
+			</div>
+		</div>
+
+		<div class="section">
+			<div class="section-title">Packet History <span id="rowCount" style="color:#888;font-size:0.85rem;font-weight:normal"></span></div>
+			<table class="history-table">
+				<thead>
+					<tr>
+						<th class="time-col">Time</th>
+						<th class="rssi-col">RSSI</th>
+						<th>Service Data &nbsp;&#8212;&nbsp; Manufacturer Data</th>
+						<th class="bits-col">Bits (click a byte)</th>
+						<th class="notes-col">Notes</th>
+					</tr>
+				</thead>
+				<tbody id="historyBody">
+					<tr><td colspan="5" class="empty-row">Waiting for packets...</td></tr>
+				</tbody>
+			</table>
+		</div>
+
+		<script>
+			var MAX_ROWS = 100;
+			var rows = [];
+			var rawStream = null;
+			var watchKeepaliveTimer = null;
+			var reconnectTimer = null;
+
+			function getAddressParam() {
+				var params = new URLSearchParams(window.location.search);
+				return params.get('address');
+			}
+
+			function formatHex(value) {
+				return '0x' + ('0' + value.toString(16).toUpperCase()).slice(-2);
+			}
+
+			function formatHexList(bytes) {
+				if (!bytes || bytes.length === 0) return '-';
+				var out = '';
+				for (var i = 0; i < bytes.length; i++) {
+					if (i > 0) out += ', ';
+					out += formatHex(bytes[i]);
+				}
+				return out;
+			}
+
+			function escapeAttr(text) {
+				return String(text || '')
+					.replace(/&/g, '&amp;')
+					.replace(/"/g, '&quot;')
+					.replace(/</g, '&lt;')
+					.replace(/>/g, '&gt;');
+			}
+
+			function arraysEqual(a, b) {
+				if (!a && !b) return true;
+				if (!a || !b) return false;
+				if (a.length !== b.length) return false;
+				for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return false; }
+				return true;
+			}
+
+			function formatBytes(bytes, previousBytes, rowIdx, type) {
+				if (!bytes || bytes.length === 0) return '<span class="no-data">-</span>';
+				var html = '';
+				for (var i = 0; i < bytes.length; i++) {
+					var changed = previousBytes && i < previousBytes.length && previousBytes[i] !== bytes[i];
+					if (i > 0) html += '<span class="byte-separator">, </span>';
+					html += '<span class="' + (changed ? 'byte-value-changed' : 'byte-value') +
+									'" data-brow="' + rowIdx + '" data-bidx="' + i +
+									'" data-btype="' + type + '" data-bval="' + bytes[i] + '">' +
+									formatHex(bytes[i]) + '</span>';
+				}
+				return html;
+			}
+
+			function formatBits(val, prevVal, byteIdx, type) {
+				var html = '<span class="bit-label">' + type + '[' + byteIdx + ']</span>';
+				for (var b = 7; b >= 0; b--) {
+					var bit = (val >> b) & 1;
+					var prevBit = (prevVal !== null && prevVal !== undefined) ? (prevVal >> b) & 1 : null;
+					var changed = prevBit !== null && prevBit !== bit;
+					if (b === 3) html += '<span class="bit-gap">&#xb7;</span>';
+					html += '<span class="' + (changed ? 'bit-changed' : 'bit-normal') + '">' + bit + '</span>';
+				}
+				return html;
+			}
+
+			function decodeStateInfo(mfgBytes) {
+				if (!mfgBytes || mfgBytes.length <= 9) return null;
+				var val = mfgBytes[9];
+				var mask30 = val & 0x30;
+				var mask08 = val & 0x08;
+				var bitPair = ((mask30 >> 5) & 1).toString() + ((mask30 >> 4) & 1).toString();
+				var stateLabel = 'Locked';
+				if (mask30 === 0x30) {
+					stateLabel = 'Latched';
+				} else if (mask08 === 0x08) {
+					stateLabel = 'Unlocked';
+				}
+				return {
+					mask30: mask30,
+					mask08: mask08,
+					bitPair: bitPair,
+					stateLabel: stateLabel,
+					text: 'mfg[9]&0x30=' + formatHex(mask30) + ' (' + bitPair + '), mfg[9]&0x08=' + formatHex(mask08) + ' -> ' + stateLabel
+				};
+			}
+
+			function formatStateBits(mfgBytes, prevMfgBytes) {
+				var state = decodeStateInfo(mfgBytes);
+				if (!state) return '<span class="no-data">-</span>';
+				var prevState = decodeStateInfo(prevMfgBytes);
+				var changed = prevState && (prevState.mask30 !== state.mask30 || prevState.mask08 !== state.mask08);
+				return '<span class="' + (changed ? 'state-changed' : 'state-value') + '">' + state.text + '</span>';
+			}
+
+			function copyTableToClipboard() {
+				if (rows.length === 0) return;
+				var lines = [];
+				lines.push('Time\tRSSI\tService Data\tManufacturer Data\tState\tNotes');
+				for (var i = 0; i < rows.length; i++) {
+					var r = rows[i];
+					var state = decodeStateInfo(r.manufacturerData);
+					lines.push([
+						r.time,
+						r.rssi,
+						formatHexList(r.serviceData),
+						formatHexList(r.manufacturerData),
+						state ? state.text : '-',
+						(r.note || '').replace(/\r?\n/g, ' ')
+					].join('\t'));
+				}
+				var output = lines.join('\n');
+
+				function showCopied(msg) {
+					document.getElementById('status').innerHTML = '<span class="live">&#9679; Live</span> - ' + msg;
+				}
+
+				if (navigator.clipboard && navigator.clipboard.writeText) {
+					navigator.clipboard.writeText(output)
+						.then(function() { showCopied('Copied ' + rows.length + ' rows to clipboard'); })
+						.catch(function() { fallbackCopy(output, showCopied); });
+				} else {
+					fallbackCopy(output, showCopied);
+				}
+			}
+
+			function fallbackCopy(text, onDone) {
+				var ta = document.createElement('textarea');
+				ta.value = text;
+				ta.setAttribute('readonly', '');
+				ta.style.position = 'absolute';
+				ta.style.left = '-9999px';
+				document.body.appendChild(ta);
+				ta.select();
+				try {
+					document.execCommand('copy');
+					onDone('Copied ' + rows.length + ' rows to clipboard');
+				} catch (e) {
+					onDone('Copy failed');
+				}
+				document.body.removeChild(ta);
+			}
+
+			function renderRows() {
+				var tbody = document.getElementById('historyBody');
+				if (rows.length === 0) {
+					tbody.innerHTML = '<tr><td colspan="5" class="empty-row">Waiting for packets...</td></tr>';
+					document.getElementById('rowCount').textContent = '';
+					return;
+				}
+				document.getElementById('rowCount').textContent = '(' + rows.length + ')';
+				var html = '';
+				for (var i = 0; i < rows.length; i++) {
+					var r = rows[i];
+					var prev = i + 1 < rows.length ? rows[i + 1] : null;
+					var prevSvc = prev ? prev.serviceData : null;
+					var prevMfg = prev ? prev.manufacturerData : null;
+					var svcHtml = formatBytes(r.serviceData, prevSvc, i, 'svc');
+					var mfgHtml = formatBytes(r.manufacturerData, prevMfg, i, 'mfg');
+					html += '<tr>';
+					html += '<td class="time-col">' + r.time + '</td>';
+					html += '<td class="rssi-col">' + r.rssi + '</td>';
+					html += '<td>' + svcHtml + '<span class="dash-separator">&#8212;</span>' + mfgHtml + '</td>';
+					html += '<td class="bits-col" id="bits-' + i + '"></td>';
+					html += '<td class="notes-col"><input class="note-input" type="text" data-note-row="' + i + '" value="' + escapeAttr(r.note) + '" placeholder="e.g. Locked, Latched"></td>';
+					html += '</tr>';
+				}
+				tbody.innerHTML = html;
+			}
+
+			document.getElementById('historyBody').addEventListener('click', function(e) {
+				var t = e.target;
+				var rowIdx = t.getAttribute('data-brow');
+				if (rowIdx === null) return;
+				rowIdx = parseInt(rowIdx);
+				var byteIdx = parseInt(t.getAttribute('data-bidx'));
+				var type = t.getAttribute('data-btype');
+				var val = parseInt(t.getAttribute('data-bval'));
+
+				// Highlight selected byte, clear previous
+				var prevSel = document.querySelectorAll('.byte-selected');
+				for (var s = 0; s < prevSel.length; s++) prevSel[s].classList.remove('byte-selected');
+				t.classList.add('byte-selected');
+
+				var prevRow = rows[rowIdx + 1];
+				var prevBytes = prevRow ? (type === 'svc' ? prevRow.serviceData : prevRow.manufacturerData) : null;
+				var prevVal = (prevBytes && byteIdx < prevBytes.length) ? prevBytes[byteIdx] : null;
+
+				var bitsCell = document.getElementById('bits-' + rowIdx);
+				if (bitsCell) bitsCell.innerHTML = formatBits(val, prevVal, byteIdx, type);
+			});
+
+			document.getElementById('historyBody').addEventListener('input', function(e) {
+				var t = e.target;
+				var noteRow = t.getAttribute('data-note-row');
+				if (noteRow === null) return;
+				noteRow = parseInt(noteRow);
+				if (!isNaN(noteRow) && rows[noteRow]) rows[noteRow].note = t.value;
+			});
+
+			function addPacket(data) {
+				var svc = data.serviceData ? data.serviceData.slice() : [];
+				var mfg = data.manufacturerData ? data.manufacturerData.slice() : [];
+				if (rows.length > 0 && arraysEqual(svc, rows[0].serviceData) && arraysEqual(mfg, rows[0].manufacturerData)) {
+					document.getElementById('deviceRssi').textContent = data.rssi + ' dBm';
+					document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+					return;
+				}
+				rows.unshift({ serviceData: svc, manufacturerData: mfg, rssi: data.rssi, time: new Date().toLocaleTimeString(), note: '' });
+				if (rows.length > MAX_ROWS) rows.pop();
+				document.getElementById('deviceAddress').textContent = data.address || '-';
+				document.getElementById('deviceRssi').textContent = data.rssi + ' dBm';
+				document.getElementById('lastUpdate').textContent = rows[0].time;
+				renderRows();
+			}
+
+			function clearHistory() {
+				rows = [];
+				renderRows();
+			}
+
+			function goBackAndClear() {
+				if (rawStream) {
+					rawStream.close();
+					rawStream = null;
+				}
+				if (watchKeepaliveTimer !== null) {
+					clearInterval(watchKeepaliveTimer);
+					watchKeepaliveTimer = null;
+				}
+				if (reconnectTimer !== null) {
+					clearTimeout(reconnectTimer);
+					reconnectTimer = null;
+				}
+				fetch('/api/v1/device/watch?address=').catch(function(){});
+				window.location.href = '/api/v1/devices/table';
+			}
+
+			function refreshWatch(address) {
+				fetch('/api/v1/device/watch?address=' + encodeURIComponent(address))
+					.catch(function(e) { console.log('Error setting watch:', e); });
+			}
+
+      function startLiveStream() {
+        var address = getAddressParam();
+        if (!address) {
+          document.getElementById('status').innerHTML = '<span class="error">Error: No device address specified</span>';
+          return;
+        }
+
+				refreshWatch(address);
+				if (watchKeepaliveTimer === null) {
+					watchKeepaliveTimer = setInterval(function() { refreshWatch(address); }, 30000);
+				}
+
+				if (rawStream) {
+					rawStream.close();
+					rawStream = null;
+				}
+
+				rawStream = new EventSource('/api/v1/device/raw-stream');
+
+				rawStream.addEventListener('packet', function(e) {
+          try {
+            addPacket(JSON.parse(e.data));
+          } catch (err) {
+            console.log('Error parsing packet data:', err);
+          }
+        });
+
+				rawStream.onerror = function() {
+          document.getElementById('status').innerHTML = '<span class="error">Connection lost - reconnecting...</span>';
+					if (rawStream) {
+						rawStream.close();
+						rawStream = null;
+					}
+					if (reconnectTimer === null) {
+						reconnectTimer = setTimeout(function() {
+							reconnectTimer = null;
+							startLiveStream();
+						}, 3000);
+					}
+        };
+      }
+
+			window.addEventListener("beforeunload", function() {
+				if (rawStream) {
+					rawStream.close();
+					rawStream = null;
+				}
+				if (watchKeepaliveTimer !== null) {
+					clearInterval(watchKeepaliveTimer);
+					watchKeepaliveTimer = null;
+				}
+				if (reconnectTimer !== null) {
+					clearTimeout(reconnectTimer);
+					reconnectTimer = null;
+				}
+				fetch('/api/v1/device/watch?address=').catch(function(){});
+			});
+
+      startLiveStream();
+    </script>
+  </body>
+</html>
+)HTMLEOF";
+
 BLE_Device BLE_Devices;
 ClientCallbacks OurCallbacks;
 SemaphoreHandle_t callbackMutex = nullptr;
 SemaphoreHandle_t historyMutex = nullptr;
+
+// Hot MAC address for real-time raw packet streaming
+char hotMAC[ 18 ] = "";
+volatile uint32_t hotMACLeaseExpiresAtMs = 0;
+const uint32_t HOT_MAC_LEASE_MS = 120000;
+SemaphoreHandle_t hotMACMutex = nullptr;
+AsyncEventSource rawPacketEvents( "/api/v1/device/raw-stream" );
 
 static inline void lockCallbacks()
 {
@@ -1737,6 +2544,7 @@ uint32_t BLESending = 0;
 volatile bool BLECommandConnectInProgress = false;
 bool RebootRequired = false;
 bool otaInProgress = false;
+volatile bool ScanPausedByUser = false;
 
 // Single shared response buffer used by all HTTP GET handlers.
 // request->send() copies the data before returning so reuse is safe.
@@ -1750,6 +2558,7 @@ int32_t NumMatchedRejected = 0;
 int32_t NumBadDataRejected = 0;
 int32_t NumUpdatesAt0 = 0;
 int32_t NumZeroUpdateIntervals = 0;
+int32_t NumZeroAdvertIntervals = 0;
 volatile int32_t LastUpdatesPerMinute = 0;
 volatile int32_t LastActualDataUpdatesPerMinute = 0;
 volatile int32_t LastAdvertsSeenPerMinute = 0;
@@ -1757,19 +2566,45 @@ volatile int32_t LastMatchedServiceDataPerMinute = 0;
 volatile int32_t LastMatchedEmptyPayloadPerMinute = 0;
 volatile int32_t LastMatchedRejectedPerMinute = 0;
 volatile int32_t LastBadDataRejectedPerMinute = 0;
+volatile uint32_t LastAdvertSeenAtMs = 0;
+volatile uint32_t LastForcedScanRecoveryAtMs = 0;
+volatile uint32_t LastScanRestartAttemptAtMs = 0;
+volatile uint32_t LastSuccessfulScanRestartAtMs = 0;
+volatile uint32_t LastMemoryScanRecoveryAtMs = 0;
 volatile uint32_t LastFreeHeap = 0;
 volatile uint32_t LastLargestHeapBlock = 0;
 volatile uint32_t LastStatsAt = 0;
 volatile uint8_t LastCpuUsagePercent = 0;
 static uint32_t PrevIdleRunTime = 0;
 static uint32_t PrevTotalRunTime = 0;
+static constexpr UBaseType_t CPU_USAGE_MAX_TASKS = 32;
+static TaskStatus_t CpuTaskBuffer[ CPU_USAGE_MAX_TASKS ];
 volatile bool pendingSSEUpdate = false;
 volatile bool pendingSSEStats = false;
+volatile uint32_t DiagStatsRequests = 0;
+volatile uint32_t DiagDevicesRequests = 0;
+volatile uint32_t DiagRawPacketsBuilt = 0;
+volatile uint32_t DiagRawPacketsSent = 0;
+volatile uint32_t DiagSseBleSent = 0;
+volatile uint32_t DiagSseStatsSent = 0;
+volatile uint32_t DiagScanOnResultCalls = 0;
+volatile uint32_t DiagScanRestartCount = 0;
+volatile uint32_t DiagScanRestartSuppressedCount = 0;
+volatile uint32_t DiagScanStaleRecoveryCount = 0;
+volatile uint32_t DiagScanMemoryRecoveryCount = 0;
+volatile uint32_t DiagDiscoveryPacketsRx = 0;
+volatile uint32_t DiagDiscoveryQueryRx = 0;
+volatile uint32_t DiagDiscoveryAnnouncementsTx = 0;
+volatile uint32_t DiagPushPostCount = 0;
+volatile uint32_t DiagPushPostErrorCount = 0;
 unsigned long lastSSESend = 0;
 unsigned long lastSSEStatsSend = 0;
 unsigned long nextStatsSample = 0;
 const uint32_t STATS_SAMPLE_MS = 15000;
 const uint32_t STATS_PER_MINUTE_SCALE = 60000 / STATS_SAMPLE_MS;
+const uint32_t SCAN_RESTART_COOLDOWN_MS = 2000;
+const uint32_t SCAN_MEMORY_RECOVERY_COOLDOWN_MS = 120000;
+const uint32_t SCAN_MEMORY_RECOVERY_LARGEST_BLOCK_THRESHOLD = 17000;
 const uint16_t FREE_HEAP_HISTORY_MAX = 1000;
 const uint8_t UNKNOWN_TYPE_MAX = 100;
 const uint8_t HOMEY_HISTORY_MAX = 10;
@@ -1965,6 +2800,126 @@ static void RespBufAppendf( char* buf, int bufSize, int& pos, int& rem, const ch
 static bool IsHexDigitChar( char c )
 {
 	return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ) || ( c >= 'A' && c <= 'F' );
+}
+
+static bool StrEqualsIgnoreCase( const char* a, const char* b )
+{
+	if ( a == nullptr || b == nullptr )
+	{
+		return false;
+	}
+
+	while ( *a != '\0' && *b != '\0' )
+	{
+		if ( tolower( ( unsigned char )*a ) != tolower( ( unsigned char )*b ) )
+		{
+			return false;
+		}
+		a++;
+		b++;
+	}
+
+	return ( *a == '\0' && *b == '\0' );
+}
+
+static bool ExtractSwitchBotAdvData( const BLEAdvertisedDevice* advertisedDevice,
+	                                 const uint8_t** serviceData,
+	                                 uint8_t* serviceDataLen,
+	                                 const uint8_t** manufacturerData,
+	                                 uint8_t* manufacturerDataLen )
+{
+	if ( advertisedDevice == nullptr || serviceData == nullptr || serviceDataLen == nullptr ||
+	     manufacturerData == nullptr || manufacturerDataLen == nullptr )
+	{
+		return false;
+	}
+
+	*serviceData = nullptr;
+	*serviceDataLen = 0;
+	*manufacturerData = nullptr;
+	*manufacturerDataLen = 0;
+
+	const std::vector<uint8_t>& payload = advertisedDevice->getPayload();
+	for ( size_t i = 0; i < payload.size(); )
+	{
+		uint8_t fieldLen = payload[ i ];
+		if ( fieldLen == 0 )
+		{
+			break;
+		}
+
+		size_t fieldStart = i + 1;
+		size_t fieldEnd = fieldStart + fieldLen;
+		if ( fieldEnd > payload.size() )
+		{
+			break;
+		}
+
+		uint8_t type = payload[ fieldStart ];
+		const uint8_t* value = &payload[ fieldStart + 1 ];
+		size_t valueLen = fieldLen - 1;
+
+		if ( type == BLE_HS_ADV_TYPE_SVC_DATA_UUID16 && valueLen >= 2 )
+		{
+			uint16_t uuid16 = ( ( uint16_t )value[ 1 ] << 8 ) | value[ 0 ];
+			if ( uuid16 == 0x0d00 || uuid16 == 0xfd3d )
+			{
+				*serviceData = value + 2;
+				*serviceDataLen = ( uint8_t )( valueLen - 2 );
+			}
+		}
+		else if ( type == BLE_HS_ADV_TYPE_MFG_DATA )
+		{
+			*manufacturerData = value;
+			*manufacturerDataLen = ( uint8_t )valueLen;
+		}
+
+		i = fieldEnd;
+	}
+
+	return ( *serviceData != nullptr );
+}
+
+static void FormatBleAddress( const NimBLEAddress& address, char* outMac, size_t outMacSize )
+{
+	if ( outMac == nullptr || outMacSize == 0 )
+	{
+		return;
+	}
+
+	const uint8_t* addr = address.getVal();
+	if ( addr == nullptr )
+	{
+		outMac[ 0 ] = '\0';
+		return;
+	}
+
+	snprintf( outMac,
+	          outMacSize,
+	          "%02X:%02X:%02X:%02X:%02X:%02X",
+	          addr[ 5 ],
+	          addr[ 4 ],
+	          addr[ 3 ],
+	          addr[ 2 ],
+	          addr[ 1 ],
+	          addr[ 0 ] );
+}
+
+static bool StartBleScanTracked( BLEScan* pBLEScan, bool trackRestart )
+{
+	if ( pBLEScan == nullptr )
+	{
+		return false;
+	}
+
+	pBLEScan->start( 0, false, true );
+	bool isRunning = pBLEScan->isScanning();
+	if ( trackRestart && isRunning )
+	{
+		LastSuccessfulScanRestartAtMs = millis();
+	}
+
+	return isRunning;
 }
 
 static bool IsValidMacAddress( const char* mac )
@@ -2177,23 +3132,17 @@ static void RecordUnknownType( uint8_t type, const char* mac, bool hasSubtype = 
 
 static void SampleCpuUsage()
 {
-	const UBaseType_t maxTasks = 32;
-	TaskStatus_t* taskBuffer = ( TaskStatus_t* )malloc( sizeof( TaskStatus_t ) * maxTasks );
-	if ( !taskBuffer )
-		return;
-
 	uint32_t totalRunTime = 0;
-	UBaseType_t taskCount = uxTaskGetSystemState( taskBuffer, maxTasks, &totalRunTime );
+	UBaseType_t taskCount = uxTaskGetSystemState( CpuTaskBuffer, CPU_USAGE_MAX_TASKS, &totalRunTime );
 
 	uint32_t idleRunTime = 0;
 	for ( UBaseType_t i = 0; i < taskCount; i++ )
 	{
-		if ( strncmp( taskBuffer[ i ].pcTaskName, "IDLE", 4 ) == 0 )
+		if ( strncmp( CpuTaskBuffer[ i ].pcTaskName, "IDLE", 4 ) == 0 )
 		{
-			idleRunTime += taskBuffer[ i ].ulRunTimeCounter;
+			idleRunTime += CpuTaskBuffer[ i ].ulRunTimeCounter;
 		}
 	}
-	free( taskBuffer );
 
 	uint32_t deltaIdle = idleRunTime - PrevIdleRunTime;
 	uint32_t deltaTotal = ( totalRunTime - PrevTotalRunTime ) * ( uint32_t )portNUM_PROCESSORS;
@@ -2263,15 +3212,23 @@ static void SendDiscoveryAnnouncement( const IPAddress* targetIp = nullptr, uint
 	if ( targetIp != nullptr && targetPort != 0 )
 	{
 		size_t sent = udp.writeTo( ( const uint8_t* )message, ( size_t )length, *targetIp, targetPort );
-		Serial.printf( "UDP unicast discovery reply to %s:%u (%u bytes)\n", targetIp->toString().c_str(), targetPort, ( unsigned int )sent );
+		IncrementVolatileU32( DiagDiscoveryAnnouncementsTx );
+		char ipBuf[ 16 ];
+		FormatIpAddress( *targetIp, ipBuf, sizeof( ipBuf ) );
+		Serial.printf( "UDP unicast discovery reply to %s:%u (%u bytes)\n", ipBuf, targetPort, ( unsigned int )sent );
 	}
 
 	size_t multicastSent = udp.writeTo( ( const uint8_t* )message, ( size_t )length, DISCOVERY_MULTICAST_IP, DISCOVERY_PORT );
-	Serial.printf( "UDP multicast discovery announcement to %s:%u (%u bytes)\n", DISCOVERY_MULTICAST_IP.toString().c_str(), DISCOVERY_PORT, ( unsigned int )multicastSent );
+	IncrementVolatileU32( DiagDiscoveryAnnouncementsTx );
+	char multicastIpBuf[ 16 ];
+	FormatIpAddress( DISCOVERY_MULTICAST_IP, multicastIpBuf, sizeof( multicastIpBuf ) );
+	Serial.printf( "UDP multicast discovery announcement to %s:%u (%u bytes)\n", multicastIpBuf, DISCOVERY_PORT, ( unsigned int )multicastSent );
 }
 
 static void HandleDiscoveryPacket( AsyncUDPPacket& packet, const char* listenerName )
 {
+	IncrementVolatileU32( DiagDiscoveryPacketsRx );
+
 	// Build packet text directly into buffer
 	char packetText[ 256 ];
 	size_t textLen = 0;
@@ -2308,10 +3265,13 @@ static void HandleDiscoveryPacket( AsyncUDPPacket& packet, const char* listenerN
 
 	if ( isDiscoveryQuery )
 	{
+		IncrementVolatileU32( DiagDiscoveryQueryRx );
+		char remoteIpBuf[ 16 ];
+		FormatIpAddress( packet.remoteIP(), remoteIpBuf, sizeof( remoteIpBuf ) );
 		Serial.printf( "Received discovery on %s: '%s' from %s:%u\n",
 		               listenerName,
 		               packetText,
-		               packet.remoteIP().toString().c_str(),
+		               remoteIpBuf,
 		               packet.remotePort() );
 		IPAddress remoteIp = packet.remoteIP();
 		uint16_t remotePort = packet.remotePort();
@@ -2320,13 +3280,76 @@ static void HandleDiscoveryPacket( AsyncUDPPacket& packet, const char* listenerN
 	}
 	else
 	{
+		char remoteIpBuf[ 16 ];
+		FormatIpAddress( packet.remoteIP(), remoteIpBuf, sizeof( remoteIpBuf ) );
 		Serial.printf( "Received other UDP packet on %s from %s:%u len=%u text='%s'\n",
 		               listenerName,
-		               packet.remoteIP().toString().c_str(),
+		               remoteIpBuf,
 		               packet.remotePort(),
 		               ( unsigned int )packet.length(),
 		               packetText );
 	}
+}
+
+// Stream raw packet data to web clients if the MAC matches the hot MAC
+void streamRawPacketData( const char* MAC, int rssi, const uint8_t* serviceData, uint8_t serviceDataSize, const uint8_t* manufacturerData, uint8_t manufacturerDataSize )
+{
+	if ( hotMACMutex == nullptr )
+		return;
+
+	xSemaphoreTake( hotMACMutex, portMAX_DELAY );
+	bool shouldStream = false;
+	if ( hotMAC[ 0 ] != '\0' )
+	{
+		const uint32_t nowMs = millis();
+		if ( ( int32_t )( nowMs - hotMACLeaseExpiresAtMs ) >= 0 )
+		{
+			hotMAC[ 0 ] = '\0';
+			hotMACLeaseExpiresAtMs = 0;
+		}
+		else
+		{
+			shouldStream = StrEqualsIgnoreCase( MAC, hotMAC );
+		}
+	}
+	xSemaphoreGive( hotMACMutex );
+
+	if ( !shouldStream )
+		return;
+
+	IncrementVolatileU32( DiagRawPacketsBuilt );
+
+	// Build JSON with raw byte arrays
+	int pos = 0;
+	int rem = ( int )sizeof( sharedRespBuf );
+#define RAW_APPEND( ... )                                                                        \
+	do                                                                                            \
+	{                                                                                             \
+		RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); \
+	} while ( 0 )
+
+	RAW_APPEND( "{\"address\":\"%s\",\"rssi\":%d,\"serviceData\":[", MAC, rssi );
+
+	// Add service data bytes
+	for ( int i = 0; i < serviceDataSize; i++ )
+	{
+		RAW_APPEND( "%s%u", i > 0 ? "," : "", ( unsigned )serviceData[ i ] );
+	}
+
+	RAW_APPEND( "],\"manufacturerData\":[" );
+
+	// Add manufacturer data bytes
+	for ( int i = 0; i < manufacturerDataSize; i++ )
+	{
+		RAW_APPEND( "%s%u", i > 0 ? "," : "", ( unsigned )manufacturerData[ i ] );
+	}
+
+	RAW_APPEND( "]}" );
+#undef RAW_APPEND
+
+	// Send to all connected SSE clients
+	rawPacketEvents.send( sharedRespBuf, "packet", millis() );
+	IncrementVolatileU32( DiagRawPacketsSent );
 }
 
 void handleRoot( AsyncWebServerRequest* request )
@@ -2390,27 +3413,34 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 	void onResult( const BLEAdvertisedDevice* advertisedDevice ) override
 	{
 		NumAdvertsSeen++;
-		// We have found a device, let us now see if it contains the service we are looking for.
-		NimBLEUUID id1( ( uint16_t )0x0d00 );
-		NimBLEUUID id2( ( uint16_t )0xfd3d );
-		NimBLEUUID devicId = advertisedDevice->getServiceDataUUID();
-		if ( ( devicId == id1 ) || ( devicId == id2 ) )
+		IncrementVolatileU32( DiagScanOnResultCalls );
+		LastAdvertSeenAtMs = millis();
+		const uint8_t* serviceDataBuf = nullptr;
+		uint8_t serviceDataLen = 0;
+		const uint8_t* manufacturerDataBuf = nullptr;
+		uint8_t manufacturerDataLen = 0;
+		if ( ExtractSwitchBotAdvData( advertisedDevice, &serviceDataBuf, &serviceDataLen,
+		                             &manufacturerDataBuf, &manufacturerDataLen ) )
 		{
-			std::string deviceAddress = advertisedDevice->getAddress().toString();
-			const char* deviceAddressCStr = deviceAddress.c_str();
-			const std::string& serviceData = advertisedDevice->getServiceData();
-			if ( serviceData.length() == 0 )
+			const NimBLEAddress& address = advertisedDevice->getAddress();
+			char deviceAddress[ 18 ];
+			FormatBleAddress( address, deviceAddress, sizeof( deviceAddress ) );
+			if ( serviceDataLen == 0 )
 			{
 				NumMatchedEmptyPayload++;
 				return;
 			}
-			const uint8_t* serviceDataBuf = ( const uint8_t* )serviceData.data();
 			NumMatchedServiceData++;
 			bool dataUpdated = false;
 			bool failedValidation = false;
 			bool unknownType = false;
-			const std::string mfgData = advertisedDevice->getManufacturerData();
-			if ( BLE_Devices.AddDevice( deviceAddressCStr, advertisedDevice->getRSSI(), advertisedDevice->getAddress().getType(), ( uint8_t* )serviceData.data(), serviceData.length(), ( uint8_t* )mfgData.data(), mfgData.length(), &dataUpdated, &failedValidation, &unknownType ) )
+
+			// Always stream raw packet data if this device matches the hot MAC,
+			// regardless of whether AddDevice succeeds or fails validation
+			int rssi = advertisedDevice->getRSSI();
+			streamRawPacketData( deviceAddress, rssi, serviceDataBuf, serviceDataLen, manufacturerDataBuf, manufacturerDataLen );
+
+			if ( BLE_Devices.AddDevice( deviceAddress, rssi, address.getType(), ( uint8_t* )serviceDataBuf, serviceDataLen, ( uint8_t* )manufacturerDataBuf, manufacturerDataLen, &dataUpdated, &failedValidation, &unknownType ) )
 			{
 				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
 				NumUpdates++;
@@ -2424,13 +3454,13 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 			{
 				if ( failedValidation && unknownType )
 				{
-					if ( serviceDataBuf[ 0 ] == 0 && serviceData.length() >= 7 )
+					if ( serviceDataBuf[ 0 ] == 0 && serviceDataLen >= 7 )
 					{
-						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddressCStr, true, serviceDataBuf[ 4 ], serviceDataBuf[ 5 ], serviceDataBuf[ 6 ] );
+						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddress, true, serviceDataBuf[ 4 ], serviceDataBuf[ 5 ], serviceDataBuf[ 6 ] );
 					}
 					else
 					{
-						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddressCStr );
+						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddress );
 					}
 					NumMatchedRejected++;
 				}
@@ -2448,14 +3478,28 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 
 	void onScanEnd( const NimBLEScanResults& results, int reason ) override
 	{
+		if ( ScanPausedByUser )
+		{
+			Serial.printf( "Scan ended reason = %d; paused by user, not restarting\n", reason );
+			return;
+		}
+
 		if ( BLECommandConnectInProgress )
 		{
 			Serial.printf( "Scan ended reason = %d; connect in progress, delaying scan restart\n", reason );
 			return;
 		}
 
+		uint32_t now = millis();
+		if ( ( uint32_t )( now - LastScanRestartAttemptAtMs ) < SCAN_RESTART_COOLDOWN_MS )
+		{
+			IncrementVolatileU32( DiagScanRestartSuppressedCount );
+			return;
+		}
+
 		Serial.printf( "Scan ended reason = %d; restarting scan\n", reason );
-		NimBLEDevice::getScan()->start( 0, false, true );
+		LastScanRestartAttemptAtMs = now;
+		StartBleScanTracked( NimBLEDevice::getScan(), true );
 	}
 }; // MyAdvertisedDeviceCallbacks
 
@@ -2475,6 +3519,11 @@ void setup()
 	if ( historyMutex == nullptr )
 	{
 		Serial.println( "Failed to create history mutex" );
+	}
+	hotMACMutex = xSemaphoreCreateMutex();
+	if ( hotMACMutex == nullptr )
+	{
+		Serial.println( "Failed to create hotMAC mutex" );
 	}
 
 	AsyncWiFiManager wifiManager( &server, &dns );
@@ -2499,7 +3548,9 @@ void setup()
 	server.on( "/api/v1/devices/table", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 		Serial.println( "Received request for devices table" );
-		request->send( 200, "text/html", DEVICES_TABLE_HTML );
+		AsyncWebServerResponse* response = request->beginResponse( 200, "text/html", ( const uint8_t* )DEVICES_TABLE_HTML, sizeof( DEVICES_TABLE_HTML ) - 1 );
+		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
+		request->send( response );
 		digitalWrite( led, 0 );
 	} );
 
@@ -2526,7 +3577,7 @@ void setup()
 			return; // response object already created by onRequestBody
 
 		char clientIP[ 64 ];
-		snprintf( clientIP, sizeof( clientIP ), "%s", IPAddress( request->client()->getRemoteAddress() ).toString().c_str() );
+		FormatIpAddress( IPAddress( request->client()->getRemoteAddress() ), clientIP, sizeof( clientIP ) );
 		Serial.printf( "API function %s not found from %s\n", request->url().c_str(), clientIP );
 
 		request->send( 404, "text/plain", "Not found" );
@@ -2556,14 +3607,26 @@ void setup()
 		    {
 			    if ( request->_tempObject != nullptr )
 			    {
-				    delete ( String* )request->_tempObject;
+				    POST_BODY_BUFFER* oldBody = ( POST_BODY_BUFFER* )request->_tempObject;
+				    delete[] oldBody->data;
+				    delete oldBody;
 				    request->_tempObject = nullptr;
 			    }
-			    String* body = new String();
+			    POST_BODY_BUFFER* body = new POST_BODY_BUFFER();
 			    if ( body != nullptr )
 			    {
-				    body->reserve( total );
-				    request->_tempObject = body;
+				    body->cap = total + 1;
+				    body->len = 0;
+				    body->data = new char[ body->cap ];
+				    if ( body->data != nullptr )
+				    {
+					    body->data[ 0 ] = '\0';
+					    request->_tempObject = body;
+				    }
+				    else
+				    {
+					    delete body;
+				    }
 			    }
 		    }
 
@@ -2574,11 +3637,19 @@ void setup()
 			    return;
 		    }
 
-		    String* body = ( String* )request->_tempObject;
-		    for ( size_t i = 0; i < len; i++ )
+		    POST_BODY_BUFFER* body = ( POST_BODY_BUFFER* )request->_tempObject;
+		    if ( body->len + len >= body->cap )
 		    {
-			    *body += ( char )data[ i ];
+			    request->send( 413, "text/plain", "Payload Too Large" );
+			    delete[] body->data;
+			    delete body;
+			    request->_tempObject = nullptr;
+			    digitalWrite( led, 0 );
+			    return;
 		    }
+		    memcpy( body->data + body->len, data, len );
+		    body->len += len;
+		    body->data[ body->len ] = '\0';
 
 		    if ( ( index + len ) < total )
 		    {
@@ -2586,16 +3657,23 @@ void setup()
 			    return;
 		    }
 
-		    const uint8_t* payloadData = ( const uint8_t* )body->c_str();
-		    size_t payloadLen = body->length();
-		    delete body;
-		    request->_tempObject = nullptr;
+		    const uint8_t* payloadData = ( const uint8_t* )body->data;
+		    size_t payloadLen = body->len;
 
 		    if ( strcmp( requestUrl, "/api/v1/callback/add" ) == 0 )
 		    {
 			    Serial.println( "Received request for /api/v1/callback/add" );
 			    char uri[ 512 ];
-			    if ( TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "uri", uri, sizeof( uri ) ) )
+			    bool hasUri = TryExtractUriFromBody( payloadData, payloadLen, uri, sizeof( uri ) );
+			    if ( !hasUri && request->hasArg( "uri" ) )
+			    {
+				    if ( CopyRequestArgToBuf( request, "uri", uri, sizeof( uri ) ) )
+				    {
+					    UrlDecodeInPlace( uri );
+					    hasUri = true;
+				    }
+			    }
+			    if ( hasUri )
 			    {
 				    lockCallbacks();
 				    bool addOk = OurCallbacks.Add( uri, millis() );
@@ -2613,14 +3691,26 @@ void setup()
 			    else
 			    {
 				    request->send( 400, "text/plain", "Bad Request" );
-				    Serial.println( "Callback error 400" );
+				    Serial.printf( "Callback error 400: no uri found. payloadLen=%u args=%u payload='%s'\n",
+				                   ( unsigned int )payloadLen,
+				                   request->args(),
+				                   ( const char* )payloadData );
 			    }
 		    }
 		    else if ( strcmp( requestUrl, "/api/v1/callback/remove" ) == 0 )
 		    {
 			    Serial.println( "Received request for /api/v1/callback/remove" );
 			    char uri[ 512 ];
-			    if ( TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "uri", uri, sizeof( uri ) ) )
+			    bool hasUri = TryExtractUriFromBody( payloadData, payloadLen, uri, sizeof( uri ) );
+			    if ( !hasUri && request->hasArg( "uri" ) )
+			    {
+				    if ( CopyRequestArgToBuf( request, "uri", uri, sizeof( uri ) ) )
+				    {
+					    UrlDecodeInPlace( uri );
+					    hasUri = true;
+				    }
+			    }
+			    if ( hasUri )
 			    {
 				    lockCallbacks();
 				    bool removeOk = OurCallbacks.Remove( uri );
@@ -2642,97 +3732,104 @@ void setup()
 		    else if ( strcmp( requestUrl, "/api/v1/device/write" ) == 0 )
 		    {
 			    char sourceIP[ 64 ];
-			    snprintf( sourceIP, sizeof( sourceIP ), "%s",
-			              IPAddress( request->client()->getRemoteAddress() ).toString().c_str() );
+			    FormatIpAddress( IPAddress( request->client()->getRemoteAddress() ), sourceIP, sizeof( sourceIP ) );
 			    Serial.printf( "Received /api/v1/device/write from %s payloadLen=%u payload=%s\n",
 			                   sourceIP,
 			                   ( unsigned int )payloadLen,
 			                   ( const char* )payloadData );
-			    String clientAddress;
-			    String dataToWrite;
+			    char clientAddress[ 32 ];
+			    clientAddress[ 0 ] = '\0';
+			    char dataToWrite[ 128 ];
+			    dataToWrite[ 0 ] = '\0';
 			    uint8_t commandData[ sizeof( BLE_COMMAND::Data ) ];
 			    uint8_t commandDataLen = 0;
-			    bool hasAddress = TryGetJsonStringField( payloadData, payloadLen, "address", clientAddress );
+			    bool hasAddress = TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "address", clientAddress, sizeof( clientAddress ) );
 			    if ( !hasAddress )
-				    hasAddress = TryGetJsonStringField( payloadData, payloadLen, "Address", clientAddress );
+				    hasAddress = TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "Address", clientAddress, sizeof( clientAddress ) );
 			    if ( !hasAddress )
-				    hasAddress = TryGetJsonStringField( payloadData, payloadLen, "mac", clientAddress );
+				    hasAddress = TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "mac", clientAddress, sizeof( clientAddress ) );
 			    if ( !hasAddress )
-				    hasAddress = TryGetJsonStringField( payloadData, payloadLen, "MAC", clientAddress );
+				    hasAddress = TryGetJsonStringFieldIntoBuf( payloadData, payloadLen, "MAC", clientAddress, sizeof( clientAddress ) );
 			    if ( !hasAddress && request->hasArg( "address" ) )
 			    {
-				    clientAddress = request->arg( "address" );
-				    hasAddress = clientAddress.length() > 0;
+				    hasAddress = CopyRequestArgToBuf( request, "address", clientAddress, sizeof( clientAddress ) );
 			    }
 
-			    bool hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "data", dataToWrite );
+			    bool hasData = TryParseJsonByteArrayField( payloadData, payloadLen, "data", commandData, sizeof( commandData ), commandDataLen );
 			    if ( !hasData )
-				    hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "Data", dataToWrite );
+				    hasData = TryParseJsonByteArrayField( payloadData, payloadLen, "Data", commandData, sizeof( commandData ), commandDataLen );
 			    if ( !hasData )
-				    hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "payload", dataToWrite );
+				    hasData = TryParseJsonByteArrayField( payloadData, payloadLen, "payload", commandData, sizeof( commandData ), commandDataLen );
 			    if ( !hasData )
-				    hasData = TryGetJsonByteArrayField( payloadData, payloadLen, "commandData", dataToWrite );
+				    hasData = TryParseJsonByteArrayField( payloadData, payloadLen, "commandData", commandData, sizeof( commandData ), commandDataLen );
 			    if ( !hasData && request->hasArg( "data" ) )
 			    {
-				    String argData = request->arg( "data" );
-				    argData.trim();
-				    if ( argData.length() > 0 )
+				    char argData[ 112 ];
+				    if ( CopyRequestArgToBuf( request, "data", argData, sizeof( argData ) ) )
 				    {
-					    dataToWrite = ( argData[ 0 ] == '[' ) ? argData : ( "[" + argData + "]" );
-					    hasData = true;
+					    if ( argData[ 0 ] == '[' )
+					    {
+						    strncpy( dataToWrite, argData, sizeof( dataToWrite ) - 1 );
+						    dataToWrite[ sizeof( dataToWrite ) - 1 ] = '\0';
+					    }
+					    else
+					    {
+						    snprintf( dataToWrite, sizeof( dataToWrite ), "[%s]", argData );
+					    }
+					    hasData = ParseByteListString( dataToWrite, commandData, sizeof( commandData ), commandDataLen );
 				    }
 			    }
-			    bool parsedData = hasData && ParseByteListString( dataToWrite, commandData, sizeof( commandData ), commandDataLen );
-			    bool hasNonEmptyAddress = ( clientAddress.length() > 0 );
+			    bool parsedData = hasData;
+			    bool hasNonEmptyAddress = ( clientAddress[ 0 ] != '\0' );
 			    Serial.printf( "Parsed /api/v1/device/write from %s hasAddress=%d address=%s hasData=%d data=%s parsedData=%d dataLen=%u\n",
 			                   sourceIP,
 			                   hasAddress ? 1 : 0,
-			                   clientAddress.c_str(),
+			                   clientAddress,
 			                   hasData ? 1 : 0,
-			                   dataToWrite.c_str(),
+			                   dataToWrite,
 			                   parsedData ? 1 : 0,
 			                   ( unsigned int )commandDataLen );
 
 			    if ( hasAddress && hasData && parsedData && hasNonEmptyAddress )
 			    {
 				    // Check that we have seen that device
-				    int deviceIdx = BLE_Devices.FindDevice( clientAddress.c_str() );
+				    int deviceIdx = BLE_Devices.FindDevice( clientAddress );
 				    if ( deviceIdx >= 0 )
 				    {
-					    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress.c_str(), dataToWrite.c_str(), ( unsigned int )dataToWrite.length(), sourceIP );
+					    Serial.printf( "Received request to write device %s with %s (%u) from %s\n", clientAddress, dataToWrite, ( unsigned int )strlen( dataToWrite ), sourceIP );
 
-					    if ( BLECommandQ.Find( clientAddress.c_str(), commandData, commandDataLen ) )
+					    if ( BLECommandQ.Find( clientAddress, commandData, commandDataLen ) )
 					    {
 						    // Same command already queued
 						    request->send( 200, "text/plain", "OK" );
 						    Serial.println( "Command already in the Q" );
-						    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "already-queued" );
+						    RecordBleCommandRequest( sourceIP, clientAddress, dataToWrite, "already-queued" );
 					    }
-					    else if ( BLECommandQ.Push( clientAddress.c_str(), commandData, commandDataLen, sourceIP ) )
+					    else if ( BLECommandQ.Push( clientAddress, commandData, commandDataLen, sourceIP ) )
 					    {
 						    request->send( 200, "text/plain", "OK" );
-						    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "queued" );
+						    RecordBleCommandRequest( sourceIP, clientAddress, dataToWrite, "queued" );
 					    }
 					    else
 					    {
 						    int pos = 0;
 						    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "{\"message\":\"Too Many Requests\",\"error\":\"QueueFull\",\"address\":\"" );
-						    pos += JsonEscapeInto( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, clientAddress.c_str() );
+						    pos += JsonEscapeInto( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, clientAddress );
 						    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "\"}" );
 						    request->send( 429, "application/json", sharedRespBuf );
 						    Serial.println( "I have too much in my command Q" );
-						    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "queue-full" );
+						    RecordBleCommandRequest( sourceIP, clientAddress, dataToWrite, "queue-full" );
 					    }
 				    }
 				    else
 				    {
 					    int pos = 0;
 					    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "{\"message\":\"Unknown device\",\"error\":\"UnknownDevice\",\"address\":\"" );
-					    pos += JsonEscapeInto( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, clientAddress.c_str() );
+					    pos += JsonEscapeInto( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, clientAddress );
 					    pos += snprintf( sharedRespBuf + pos, sizeof( sharedRespBuf ) - pos, "\"}" );
 					    request->send( 422, "application/json", sharedRespBuf );
-					    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress.c_str() );
-					    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), "unknown-device" );
+					    Serial.printf( "Received request to write device %s but I have not seen that device)\n", clientAddress );
+					    RecordBleCommandRequest( sourceIP, clientAddress, dataToWrite, "unknown-device" );
 				    }
 			    }
 			    else
@@ -2771,15 +3868,21 @@ void setup()
 				    request->send( 400, "application/json", sharedRespBuf );
 				    char badReqResult[ 128 ];
 				    snprintf( badReqResult, sizeof( badReqResult ), "bad-request:%s", details );
-				    RecordBleCommandRequest( sourceIP, clientAddress.c_str(), dataToWrite.c_str(), badReqResult );
+				    RecordBleCommandRequest( sourceIP, clientAddress, dataToWrite, badReqResult );
 			    }
 		    }
+
+		    // Cleanup buffered POST body after all parsing is complete.
+		    delete[] body->data;
+		    delete body;
+		    request->_tempObject = nullptr;
 
 		    digitalWrite( led, 0 );
 	    } );
 
 	server.on( "/api/v1/devices", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
+		IncrementVolatileU32( DiagDevicesRequests );
 
 		Serial.println( "Received request for devices" );
 
@@ -2789,17 +3892,16 @@ void setup()
 		bool wantJson = true;
 		if ( request->hasHeader( "Accept" ) )
 		{
-			String accept = request->getHeader( "Accept" )->value();
+			const char* accept = request->getHeader( "Accept" )->value().c_str();
 			// Only serve the HTML page if the caller explicitly wants text/html
 			// and has NOT asked for application/json
-			wantJson = ( accept.indexOf( "text/html" ) < 0 ||
-			             accept.indexOf( "application/json" ) >= 0 );
+			wantJson = ( strstr( accept, "text/html" ) == nullptr ||
+			             strstr( accept, "application/json" ) != nullptr );
 		}
 
 		if ( wantJson )
 		{
 			BLE_Devices.AllToJson( sharedRespBuf, sizeof( sharedRespBuf ), false, macAddress );
-			Serial.println( sharedRespBuf );
 			request->send( 200, "application/json", sharedRespBuf );
 		}
 		else
@@ -3020,55 +4122,187 @@ void setup()
 
 	server.on( "/api/v1/stats", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
+		IncrementVolatileU32( DiagStatsRequests );
+		BLEScan* pBLEScan = BLEDevice::getScan();
+		bool bleScanning = ( pBLEScan != nullptr ) ? pBLEScan->isScanning() : false;
 
-		AsyncResponseStream* response = request->beginResponseStream( "application/json" );
-		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
-		response->addHeader( "Pragma", "no-cache" );
-		response->addHeader( "Expires", "0" );
-		response->print( "{" );
-		response->printf( "\"uptimeMs\":%lu", ( unsigned long )millis() );
-		response->printf( ",\"advertsSeenPerMinute\":%ld", ( long )LastAdvertsSeenPerMinute );
-		response->printf( ",\"matchedServiceDataPerMinute\":%ld", ( long )LastMatchedServiceDataPerMinute );
-		response->printf( ",\"matchedEmptyPayloadPerMinute\":%ld", ( long )LastMatchedEmptyPayloadPerMinute );
-		response->printf( ",\"matchedRejectedPerMinute\":%ld", ( long )LastMatchedRejectedPerMinute );
-		response->printf( ",\"badDataRejectedPerMinute\":%ld", ( long )LastBadDataRejectedPerMinute );
-		response->printf( ",\"updatesPerMinute\":%ld", ( long )LastUpdatesPerMinute );
-		response->printf( ",\"actualDataUpdatesPerMinute\":%ld", ( long )LastActualDataUpdatesPerMinute );
-		response->printf( ",\"currentMinuteUpdates\":%ld", ( long )NumUpdates );
-		response->printf( ",\"noUpdateMinutes\":%lu", ( unsigned long )NumUpdatesAt0 );
-		response->printf( ",\"freeHeap\":%lu", ( unsigned long )LastFreeHeap );
-		response->printf( ",\"largestHeapBlock\":%lu", ( unsigned long )LastLargestHeapBlock );
-		response->printf( ",\"lastStatsAtMs\":%lu", ( unsigned long )LastStatsAt );
-		response->printf( ",\"statsIntervalMs\":%lu", ( unsigned long )STATS_SAMPLE_MS );
-		response->printf( ",\"cpuUsage\":%u", ( unsigned )LastCpuUsagePercent );
-		response->printf( ",\"registeredDevices\":%u", ( unsigned )BLE_Devices.GetNumberOfDevices() );
-		response->print( ",\"unknownTypes\":[" );
+		int pos = 0;
+		int rem = ( int )sizeof( sharedRespBuf );
+#define STATS_APPEND( ... )                                                                     \
+	do                                                                                           \
+	{                                                                                            \
+		RespBufAppendf( sharedRespBuf, ( int )sizeof( sharedRespBuf ), pos, rem, __VA_ARGS__ ); \
+	} while ( 0 )
+
+		STATS_APPEND( "{" );
+		STATS_APPEND( "\"uptimeMs\":%lu", ( unsigned long )millis() );
+		STATS_APPEND( ",\"advertsSeenPerMinute\":%ld", ( long )LastAdvertsSeenPerMinute );
+		STATS_APPEND( ",\"matchedServiceDataPerMinute\":%ld", ( long )LastMatchedServiceDataPerMinute );
+		STATS_APPEND( ",\"matchedEmptyPayloadPerMinute\":%ld", ( long )LastMatchedEmptyPayloadPerMinute );
+		STATS_APPEND( ",\"matchedRejectedPerMinute\":%ld", ( long )LastMatchedRejectedPerMinute );
+		STATS_APPEND( ",\"badDataRejectedPerMinute\":%ld", ( long )LastBadDataRejectedPerMinute );
+		STATS_APPEND( ",\"updatesPerMinute\":%ld", ( long )LastUpdatesPerMinute );
+		STATS_APPEND( ",\"actualDataUpdatesPerMinute\":%ld", ( long )LastActualDataUpdatesPerMinute );
+		STATS_APPEND( ",\"currentMinuteUpdates\":%ld", ( long )NumUpdates );
+		STATS_APPEND( ",\"noUpdateMinutes\":%lu", ( unsigned long )NumUpdatesAt0 );
+		STATS_APPEND( ",\"noAdvertMinutes\":%lu", ( unsigned long )( NumZeroAdvertIntervals / ( int32_t )STATS_PER_MINUTE_SCALE ) );
+		STATS_APPEND( ",\"lastAdvertSeenAtMs\":%lu", ( unsigned long )LastAdvertSeenAtMs );
+		STATS_APPEND( ",\"lastForcedScanRecoveryAtMs\":%lu", ( unsigned long )LastForcedScanRecoveryAtMs );
+		STATS_APPEND( ",\"lastSuccessfulScanRestartAtMs\":%lu", ( unsigned long )LastSuccessfulScanRestartAtMs );
+		STATS_APPEND( ",\"lastMemoryScanRecoveryAtMs\":%lu", ( unsigned long )LastMemoryScanRecoveryAtMs );
+		STATS_APPEND( ",\"freeHeap\":%lu", ( unsigned long )LastFreeHeap );
+		STATS_APPEND( ",\"largestHeapBlock\":%lu", ( unsigned long )LastLargestHeapBlock );
+		STATS_APPEND( ",\"lastStatsAtMs\":%lu", ( unsigned long )LastStatsAt );
+		STATS_APPEND( ",\"statsIntervalMs\":%lu", ( unsigned long )STATS_SAMPLE_MS );
+		STATS_APPEND( ",\"cpuUsage\":%u", ( unsigned )LastCpuUsagePercent );
+		STATS_APPEND( ",\"registeredDevices\":%u", ( unsigned )BLE_Devices.GetNumberOfDevices() );
+		STATS_APPEND( ",\"bleScanning\":%s", bleScanning ? "true" : "false" );
+		STATS_APPEND( ",\"scanPausedByUser\":%s", ScanPausedByUser ? "true" : "false" );
+		STATS_APPEND( ",\"diagStatsRequests\":%lu", ( unsigned long )DiagStatsRequests );
+		STATS_APPEND( ",\"diagDevicesRequests\":%lu", ( unsigned long )DiagDevicesRequests );
+		STATS_APPEND( ",\"diagRawPacketsBuilt\":%lu", ( unsigned long )DiagRawPacketsBuilt );
+		STATS_APPEND( ",\"diagRawPacketsSent\":%lu", ( unsigned long )DiagRawPacketsSent );
+		STATS_APPEND( ",\"diagSseBleSent\":%lu", ( unsigned long )DiagSseBleSent );
+		STATS_APPEND( ",\"diagSseStatsSent\":%lu", ( unsigned long )DiagSseStatsSent );
+		STATS_APPEND( ",\"diagScanOnResultCalls\":%lu", ( unsigned long )DiagScanOnResultCalls );
+		STATS_APPEND( ",\"diagScanRestartCount\":%lu", ( unsigned long )DiagScanRestartCount );
+		STATS_APPEND( ",\"diagScanRestartSuppressedCount\":%lu", ( unsigned long )DiagScanRestartSuppressedCount );
+		STATS_APPEND( ",\"diagScanStaleRecoveryCount\":%lu", ( unsigned long )DiagScanStaleRecoveryCount );
+		STATS_APPEND( ",\"diagScanMemoryRecoveryCount\":%lu", ( unsigned long )DiagScanMemoryRecoveryCount );
+		STATS_APPEND( ",\"diagDiscoveryPacketsRx\":%lu", ( unsigned long )DiagDiscoveryPacketsRx );
+		STATS_APPEND( ",\"diagDiscoveryQueryRx\":%lu", ( unsigned long )DiagDiscoveryQueryRx );
+		STATS_APPEND( ",\"diagDiscoveryAnnouncementsTx\":%lu", ( unsigned long )DiagDiscoveryAnnouncementsTx );
+		STATS_APPEND( ",\"diagPushPostCount\":%lu", ( unsigned long )DiagPushPostCount );
+		STATS_APPEND( ",\"diagPushPostErrorCount\":%lu", ( unsigned long )DiagPushPostErrorCount );
+		STATS_APPEND( ",\"unknownTypes\":[" );
+
+		lockHistory();
 		for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
 		{
-			response->printf( "%s{\"type\":%u", i > 0 ? "," : "", ( unsigned )UnknownTypes[ i ].type );
+			STATS_APPEND( "%s{\"type\":%u", i > 0 ? "," : "", ( unsigned )UnknownTypes[ i ].type );
 			if ( UnknownTypes[ i ].hasSubtype )
 			{
-				response->printf( ",\"subtype\":\"%02X%02X%02X\"", UnknownTypes[ i ].subtypeB0, UnknownTypes[ i ].subtypeB1, UnknownTypes[ i ].subtypeB2 );
+				STATS_APPEND( ",\"subtype\":\"%02X%02X%02X\"", UnknownTypes[ i ].subtypeB0, UnknownTypes[ i ].subtypeB1, UnknownTypes[ i ].subtypeB2 );
 			}
 			if ( UnknownTypes[ i ].mac[ 0 ] != '\0' )
 			{
-				response->printf( ",\"mac\":\"%s\"", UnknownTypes[ i ].mac );
+				STATS_APPEND( ",\"mac\":\"%s\"", UnknownTypes[ i ].mac );
 			}
-			response->printf( ",\"count\":%lu}", ( unsigned long )UnknownTypes[ i ].count );
+			STATS_APPEND( ",\"count\":%lu}", ( unsigned long )UnknownTypes[ i ].count );
 		}
-		response->print( "]}" );
+		unlockHistory();
 
+		STATS_APPEND( "]}" );
+#undef STATS_APPEND
+
+		AsyncWebServerResponse* response = request->beginResponse( 200, "application/json", sharedRespBuf );
+		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
+		response->addHeader( "Pragma", "no-cache" );
+		response->addHeader( "Expires", "0" );
 		request->send( response );
 
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/scan/control", HTTP_POST, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		char action[ 16 ];
+		action[ 0 ] = '\0';
+		CopyRequestArgToBuf( request, "action", action, sizeof( action ), true, true );
+
+		BLEScan* pBLEScan = BLEDevice::getScan();
+		if ( pBLEScan == nullptr )
+		{
+			request->send( 500, "application/json", "{\"ok\":false,\"error\":\"scan-unavailable\"}" );
+			digitalWrite( led, 0 );
+			return;
+		}
+
+		if ( strcmp( action, "stop" ) == 0 )
+		{
+			ScanPausedByUser = true;
+			pBLEScan->stop();
+			for ( int i = 0; i < 25 && pBLEScan->isScanning(); i++ )
+			{
+				delay( 20 );
+			}
+		}
+		else if ( strcmp( action, "start" ) == 0 )
+		{
+			ScanPausedByUser = false;
+			if ( !BLECommandConnectInProgress && !otaInProgress && !pBLEScan->isScanning() )
+			{
+				StartBleScanTracked( pBLEScan, true );
+				IncrementVolatileU32( DiagScanRestartCount );
+				LastForcedScanRecoveryAtMs = millis();
+			}
+		}
+		else
+		{
+			request->send( 400, "application/json", "{\"ok\":false,\"error\":\"invalid-action\"}" );
+			digitalWrite( led, 0 );
+			return;
+		}
+
+		char out[ 128 ];
+		snprintf( out, sizeof( out ),
+		          "{\"ok\":true,\"action\":\"%s\",\"bleScanning\":%s,\"scanPausedByUser\":%s}",
+		          action,
+		          pBLEScan->isScanning() ? "true" : "false",
+		          ScanPausedByUser ? "true" : "false" );
+		request->send( 200, "application/json", out );
+
+		digitalWrite( led, 0 );
+	} );
+
+	server.on( "/api/v1/device/watch", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+		char address[ 18 ];
+		address[ 0 ] = '\0';
+		CopyRequestArgToBuf( request, "address", address, sizeof( address ) );
+		Serial.printf( "Setting hot MAC to: %s\n", address );
+
+		if ( hotMACMutex != nullptr )
+		{
+			xSemaphoreTake( hotMACMutex, portMAX_DELAY );
+			strncpy( hotMAC, address, sizeof( hotMAC ) - 1 );
+			hotMAC[ sizeof( hotMAC ) - 1 ] = '\0';
+			hotMACLeaseExpiresAtMs = ( hotMAC[ 0 ] != '\0' ) ? ( millis() + HOT_MAC_LEASE_MS ) : 0;
+			xSemaphoreGive( hotMACMutex );
+		}
+
+		char out[ 96 ];
+		snprintf( out, sizeof( out ), "{\"ok\":true,\"address\":\"%s\"}", address );
+		request->send( 200, "application/json", out );
+		digitalWrite( led, 0 );
+	} );
+
+	rawPacketEvents.onConnect( []( AsyncEventSourceClient* client ) {
+		Serial.println( "Raw packet stream client connected" );
+		client->send( "connected", "init", millis() );
+	} );
+
+	server.addHandler( &rawPacketEvents );
+
+	server.on( "/api/v1/device/viewer", HTTP_GET, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+		AsyncWebServerResponse* response = request->beginResponse( 200, "text/html", ( const uint8_t* )RAW_PACKET_VIEWER_HTML, sizeof( RAW_PACKET_VIEWER_HTML ) - 1 );
+		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
+		response->addHeader( "Pragma", "no-cache" );
+		response->addHeader( "Expires", "0" );
+		request->send( response );
+		digitalWrite( led, 0 );
+	} );
+
 	server.on( "/api/v1/device", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
-		String address = request->arg( "address" );
-		Serial.printf( "Received request for device: %s\n", address.c_str() );
+		char address[ 18 ];
+		address[ 0 ] = '\0';
+		CopyRequestArgToBuf( request, "address", address, sizeof( address ) );
+		Serial.printf( "Received request for device: %s\n", address );
 
-		int deviceIdx = BLE_Devices.FindDevice( address.c_str() );
+		int deviceIdx = BLE_Devices.FindDevice( address );
 		BLE_Devices.DeviceToJson( deviceIdx, sharedRespBuf, sizeof( sharedRespBuf ), macAddress );
 		request->send( 200, "application/json", sharedRespBuf );
 		digitalWrite( led, 0 );
@@ -3090,8 +4324,17 @@ void setup()
 		{
 			otaInProgress = false;
 			BLEScan* pBLEScan = BLEDevice::getScan();
-			pBLEScan->start( 0, true, false );
-			Serial.println( "BLE scan restarted after OTA cancel/failure" );
+			if ( !ScanPausedByUser )
+			{
+				StartBleScanTracked( pBLEScan, true );
+				LastForcedScanRecoveryAtMs = millis();
+				IncrementVolatileU32( DiagScanRestartCount );
+				Serial.println( "BLE scan restarted after OTA cancel/failure" );
+			}
+			else
+			{
+				Serial.println( "BLE scan remains paused by user after OTA cancel/failure" );
+			}
 		}
 		request->send( 200, "application/json", "{\"ok\":true}" );
 	} );
@@ -3115,7 +4358,7 @@ void setup()
 	pBLEScan->setWindow( 200 );
 	pBLEScan->setActiveScan( true );
 	pBLEScan->setMaxResults( 0 ); // disable result storage - callbacks fire for all devices; use direct address connect for BLE commands
-	pBLEScan->start( 0, false, true );
+	StartBleScanTracked( pBLEScan, false );
 
 	Serial.println( "Application started" );
 
@@ -3173,6 +4416,7 @@ void loop()
 			pendingSSEUpdate = false;
 			lastSSESend = millis();
 			bleEvents.send( "update", "ble", millis() );
+			IncrementVolatileU32( DiagSseBleSent );
 		}
 
 		if ( pendingSSEStats && ( millis() - lastSSEStatsSend >= 1000 ) )
@@ -3180,6 +4424,7 @@ void loop()
 			pendingSSEStats = false;
 			lastSSEStatsSend = millis();
 			bleEvents.send( "update", "stats", millis() );
+			IncrementVolatileU32( DiagSseStatsSent );
 		}
 
 		if ( millis() >= sendBroadcast )
@@ -3213,7 +4458,16 @@ void loop()
 				NumUpdatesAt0 = 0;
 			}
 
-			if ( NumUpdatesAt0 > 3 && !otaInProgress )
+			if ( LastAdvertsSeenPerMinute == 0 )
+			{
+				NumZeroAdvertIntervals++;
+			}
+			else
+			{
+				NumZeroAdvertIntervals = 0;
+			}
+
+			if ( NumUpdatesAt0 > 3 && !otaInProgress && !ScanPausedByUser )
 			{
 				Serial.println( "No BLE updates for 3 minutes, rebooting" );
 				RebootRequired = true;
@@ -3275,18 +4529,76 @@ void loop()
 		OurCallbacks.Check( millis() ); // Check if any of the registered callbacks have timedout
 		unlockCallbacks();
 
-		// Scan health-check: if the BLE scan has silently stopped (NimBLE stack drop)
-		// restart it rather than waiting 3 minutes for the reboot watchdog to fire.
-		if ( !BLECommandConnectInProgress && !otaInProgress )
+		// Scan health-check and stuck-scan recovery.
+		if ( !BLECommandConnectInProgress && !otaInProgress && !ScanPausedByUser )
 		{
 			BLEScan* pBLEScan = BLEDevice::getScan();
 			if ( !pBLEScan->isScanning() )
 			{
-				Serial.println( "BLE scan not running — restarting" );
-				pBLEScan->start( 0, true, false );
-				// Reset zero-update counters so the watchdog doesn't fire on this glitch
-				NumZeroUpdateIntervals = 0;
-				NumUpdatesAt0 = 0;
+				const uint32_t now = millis();
+				if ( ( uint32_t )( now - LastScanRestartAttemptAtMs ) >= SCAN_RESTART_COOLDOWN_MS )
+				{
+					Serial.println( "BLE scan not running - restarting" );
+					LastScanRestartAttemptAtMs = now;
+					StartBleScanTracked( pBLEScan, true );
+					IncrementVolatileU32( DiagScanRestartCount );
+					LastForcedScanRecoveryAtMs = now;
+					// Reset zero-update counters so the watchdog doesn't fire on this glitch
+					NumZeroUpdateIntervals = 0;
+					NumUpdatesAt0 = 0;
+					NumZeroAdvertIntervals = 0;
+				}
+				else
+				{
+					IncrementVolatileU32( DiagScanRestartSuppressedCount );
+				}
+			}
+			else
+			{
+				const uint32_t now = millis();
+				const bool memoryFragmented = ( LastLargestHeapBlock > 0 ) &&
+				                             ( LastLargestHeapBlock < SCAN_MEMORY_RECOVERY_LARGEST_BLOCK_THRESHOLD ) &&
+				                             ( ( uint32_t )( now - LastMemoryScanRecoveryAtMs ) > SCAN_MEMORY_RECOVERY_COOLDOWN_MS ) &&
+				                             ( ( uint32_t )( now - LastScanRestartAttemptAtMs ) > SCAN_RESTART_COOLDOWN_MS );
+
+				if ( memoryFragmented )
+				{
+					Serial.printf( "BLE scan memory recovery (largest block %lu < %lu) - cycling scanner\n",
+					               ( unsigned long )LastLargestHeapBlock,
+					               ( unsigned long )SCAN_MEMORY_RECOVERY_LARGEST_BLOCK_THRESHOLD );
+					pBLEScan->stop();
+					for ( int i = 0; i < 25 && pBLEScan->isScanning(); i++ )
+					{
+						delay( 20 );
+					}
+					delay( 30 );
+					LastScanRestartAttemptAtMs = now;
+					StartBleScanTracked( pBLEScan, true );
+					IncrementVolatileU32( DiagScanRestartCount );
+					IncrementVolatileU32( DiagScanMemoryRecoveryCount );
+					LastMemoryScanRecoveryAtMs = now;
+					LastForcedScanRecoveryAtMs = now;
+				}
+
+				const bool staleNoAdverts = ( NumZeroAdvertIntervals >= 2 ) &&
+				                            ( ( uint32_t )( now - LastAdvertSeenAtMs ) > ( STATS_SAMPLE_MS * 2 ) ) &&
+				                            ( ( uint32_t )( now - LastForcedScanRecoveryAtMs ) > 10000 );
+				if ( staleNoAdverts )
+				{
+					Serial.printf( "BLE scan stale (%lu ms since advert) - force cycling scanner\n", ( unsigned long )( now - LastAdvertSeenAtMs ) );
+					pBLEScan->stop();
+					for ( int i = 0; i < 25 && pBLEScan->isScanning(); i++ )
+					{
+						delay( 20 );
+					}
+					delay( 30 );
+					LastScanRestartAttemptAtMs = now;
+					StartBleScanTracked( pBLEScan, true );
+					IncrementVolatileU32( DiagScanRestartCount );
+					IncrementVolatileU32( DiagScanStaleRecoveryCount );
+					LastForcedScanRecoveryAtMs = now;
+					NumZeroAdvertIntervals = 0;
+				}
 			}
 		}
 
@@ -3343,6 +4655,11 @@ void SendChangedDevices()
 		while ( gotEntry )
 		{
 			int httpCode = SendDeviceChange( addresBuf, deviceBuf, bytes );
+			IncrementVolatileU32( DiagPushPostCount );
+			if ( httpCode <= 0 )
+			{
+				IncrementVolatileU32( DiagPushPostErrorCount );
+			}
 			RecordPushUpdate( addresBuf, deviceBuf, bytes, httpCode );
 			if ( httpCode == -1 )
 			{
@@ -3410,7 +4727,15 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 			pBLEClient->setConnectTimeout( 12 * 1000 );
 			// Tune connection establishment scan parameters for better reliability.
 			pBLEClient->setConnectionParams( 24, 48, 0, 600, 48, 48 );
-			NimBLEAddress bleAddress( std::string( BLECommand->Address ), connectAddrType );
+			NimBLEAddress bleAddress;
+			if ( !ParseMacAddressToNimble( BLECommand->Address, connectAddrType, bleAddress ) )
+			{
+				Serial.printf( "Invalid BLE MAC address: %s\n", BLECommand->Address );
+				finalResult = "error-invalid-address";
+				NimBLEDevice::deleteClient( pBLEClient );
+				delay( 120 );
+				continue;
+			}
 			bool connected = pBLEClient->connect( bleAddress, true, false, false );
 			int connectErr = pBLEClient->getLastError();
 			if ( !connected )
@@ -3578,6 +4903,7 @@ void WriteToBLEDevice( BLE_COMMAND* BLECommand )
 
 	Serial.println( "Restarting BLE scan" );
 	BLECommandConnectInProgress = false;
-	pBLEScan->start( 0, true, false );
+	StartBleScanTracked( pBLEScan, true );
+	LastForcedScanRecoveryAtMs = millis();
 	BLESending = millis() + 1000;
 }

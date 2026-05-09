@@ -18,6 +18,7 @@
 
 #include "Arduino.h"
 #include "BLE_Device.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -40,6 +41,11 @@
 
 #define BOT_DATA_SIZE 3
 #define BOT_DATA_ID 'H'
+
+#define LOCK_DATA_SIZE 3
+#define LOCK_DATA_ID 'o'
+#define LOCKPRO_DATA_ID '\x11'
+#define LOCKPRO_V368_DATA_ID '$'
 
 #define CURTAIN_DATA_SIZE 6
 #define CURTAIN_DATA_ID 'c'
@@ -108,8 +114,9 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 	}
 
 	int expected_size = 0;
+	uint8_t normalizedType = ( Type & 0x7F );
 
-	switch ( Type )
+	switch ( normalizedType )
 	{
 	case BULB_DATA_ID:
 		if ( ManufactureDataSize >= BULB_DATA_SIZE - 1 )
@@ -221,6 +228,16 @@ bool ValidateData( uint8_t Type, uint8_t* BLEData, uint16_t BLEDataSize, uint8_t
 			expected_size = BOT_DATA_SIZE;
 			break;
 
+		case LOCK_DATA_ID:
+		case LOCKPRO_DATA_ID:
+		case LOCKPRO_V368_DATA_ID:
+			if ( BLEDataSize >= LOCK_DATA_SIZE )
+			{
+				return true;
+			}
+			expected_size = LOCK_DATA_SIZE;
+			break;
+
 		case CURTAIN_DATA_ID:
 			if ( BLEDataSize >= CURTAIN_DATA_SIZE )
 			{
@@ -322,6 +339,48 @@ static void toUpperInPlace( char* s )
 	}
 }
 
+static int AppendJsonf( char* buf, int bufSize, int pos, bool& truncated, const char* fmt, ... )
+{
+	if ( truncated || buf == nullptr || fmt == nullptr || bufSize <= 0 )
+	{
+		return pos;
+	}
+
+	if ( pos < 0 )
+	{
+		pos = 0;
+	}
+
+	if ( pos >= bufSize )
+	{
+		buf[ bufSize - 1 ] = 0;
+		truncated = true;
+		return bufSize - 1;
+	}
+
+	int rem = bufSize - pos;
+	va_list args;
+	va_start( args, fmt );
+	int written = vsnprintf( buf + pos, rem, fmt, args );
+	va_end( args );
+
+	if ( written < 0 )
+	{
+		buf[ pos ] = 0;
+		truncated = true;
+		return pos;
+	}
+
+	if ( written >= rem )
+	{
+		buf[ bufSize - 1 ] = 0;
+		truncated = true;
+		return bufSize - 1;
+	}
+
+	return pos + written;
+}
+
 BLE_Device::BLE_Device()
 {
 	NumDevices = 0;
@@ -360,6 +419,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t addrType, uint8_t
                             uint8_t ManufactureDataSize, bool* dataUpdated,
                             bool* failedValidation, bool* unknownType )
 {
+	uint8_t modelType = BLEData[ 0 ] & 0x7F;
 	if ( dataUpdated != nullptr )
 	{
 		*dataUpdated = false;
@@ -414,7 +474,7 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t addrType, uint8_t
 	strcpy( BLE_devices[ NumDevices ].MAC, MAC );
 	toUpperInPlace( BLE_devices[ NumDevices ].MAC );
 
-	switch ( BLEData[ 0 ] )
+	switch ( modelType )
 	{
 	case BULB_DATA_ID: {
 		// use manufacture data
@@ -467,6 +527,22 @@ bool BLE_Device::AddDevice( const char* MAC, int rssi, uint8_t addrType, uint8_t
 		BLE_devices[ NumDevices ].Data[ 0 ] = METERPROCO2_DATA_ID;
 		BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
 		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 1;
+		break;
+	}
+
+	case LOCK_DATA_ID:
+	case LOCKPRO_DATA_ID:
+	case LOCKPRO_V368_DATA_ID: {
+		// Keep lock service bytes in fixed positions for v4-style parsing.
+		BLE_devices[ NumDevices ].Data[ 0 ] = modelType;
+		BLE_devices[ NumDevices ].Data[ 1 ] = ( BLEDataSize > 1 ) ? BLEData[ 1 ] : 0;
+		if ( BLEDataSize > 2 )
+		{
+			BLE_devices[ NumDevices ].Data[ 2 ] = BLEData[ 2 ];
+		}
+		BLE_devices[ NumDevices ].Data[ 3 ] = ( BLEDataSize > 3 ) ? BLEData[ 3 ] : 0;
+		memcpy( BLE_devices[ NumDevices ].Data + 4, ManufactureData, ManufactureDataSize );
+		BLE_devices[ NumDevices ].DataSize = ManufactureDataSize + 4;
 		break;
 	}
 
@@ -528,7 +604,8 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
                                 uint8_t BLEDataSize, uint8_t* ManufactureData,
                                 uint8_t ManufactureDataSize )
 {
-	switch ( BLEData[ 0 ] )
+	uint8_t modelType = BLEData[ 0 ] & 0x7F;
+	switch ( modelType )
 	{
 	case BULB_DATA_ID:
 	case IOTH_DATA_ID:
@@ -541,6 +618,15 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 1 )
 		{
 			// Different manufacture data size
+			return false;
+		}
+		break;
+	}
+	case LOCK_DATA_ID:
+	case LOCKPRO_DATA_ID:
+	case LOCKPRO_V368_DATA_ID: {
+		if ( ManufactureDataSize != BLE_devices[ Index ].DataSize - 4 )
+		{
 			return false;
 		}
 		break;
@@ -563,7 +649,7 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 	}
 	}
 
-	switch ( BLEData[ 0 ] )
+	switch ( modelType )
 	{
 	case PRESENCE_DATA_ID: {
 		// Compare the presence sensor differently as there are bytes that
@@ -669,6 +755,82 @@ bool BLE_Device::CompareDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		break;
 	}
 
+	case LOCK_DATA_ID: {
+		if ( BLEDataSize < 3 || BLE_devices[ Index ].DataSize < 4 )
+		{
+			return false;
+		}
+
+		if ( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ||
+		     BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] )
+		{
+			return false;
+		}
+
+		if ( BLEDataSize > 3 && BLEData[ 3 ] != BLE_devices[ Index ].Data[ 3 ] )
+		{
+			return false;
+		}
+
+		break;
+	}
+
+	case LOCKPRO_DATA_ID: {
+		if ( BLEDataSize < 3 || BLE_devices[ Index ].DataSize < 4 )
+		{
+			return false;
+		}
+
+		if ( BLEData[ 1 ] != BLE_devices[ Index ].Data[ 1 ] ||
+		     BLEData[ 2 ] != BLE_devices[ Index ].Data[ 2 ] )
+		{
+			return false;
+		}
+
+		if ( BLEDataSize > 3 && BLEData[ 3 ] != BLE_devices[ Index ].Data[ 3 ] )
+		{
+			return false;
+		}
+
+		// Modern Lock Pro state bits live in manufacturer data, so compare it too.
+		if ( ManufactureDataSize == 0 ||
+		     ( BLE_devices[ Index ].DataSize - 4 ) != ManufactureDataSize )
+		{
+			return false;
+		}
+
+		if ( memcmp( ManufactureData, BLE_devices[ Index ].Data + 4,
+		             ManufactureDataSize ) != 0 )
+		{
+			return false;
+		}
+
+		break;
+	}
+
+	case LOCKPRO_V368_DATA_ID: {
+		// Lock Pro (legacy '$' model id) uses a different manufacturer layout.
+		if ( ManufactureDataSize < 10 || BLE_devices[ Index ].DataSize < 14 )
+		{
+			return false;
+		}
+
+		if ( ManufactureData[ 7 ] != BLE_devices[ Index ].Data[ 11 ] ||
+		     ManufactureData[ 8 ] != BLE_devices[ Index ].Data[ 12 ] ||
+		     ManufactureData[ 9 ] != BLE_devices[ Index ].Data[ 13 ] )
+		{
+			return false;
+		}
+
+		if ( ManufactureDataSize > 11 && BLE_devices[ Index ].DataSize > 15 &&
+		     ManufactureData[ 11 ] != BLE_devices[ Index ].Data[ 15 ] )
+		{
+			return false;
+		}
+
+		break;
+	}
+
 	case USE_LONG_DATA_ID: {
 		// Check for 3 byte identifier
 		if ( BLEDataSize >= 7 )
@@ -708,7 +870,8 @@ bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		return false;
 	}
 
-	switch ( BLEData[ 0 ] )
+	uint8_t modelType = BLEData[ 0 ] & 0x7F;
+	switch ( modelType )
 	{
 	case BULB_DATA_ID:
 	case IOTH_DATA_ID:
@@ -723,6 +886,21 @@ bool BLE_Device::UpdateDevice( uint8_t Index, int rssi, uint8_t* BLEData,
 		BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
 		BLE_devices[ Index ].DataSize = ManufactureDataSize + 1;
 
+		break;
+	}
+
+	case LOCK_DATA_ID:
+	case LOCKPRO_DATA_ID:
+	case LOCKPRO_V368_DATA_ID: {
+		BLE_devices[ Index ].Data[ 1 ] = ( BLEDataSize > 1 ) ? BLEData[ 1 ] : 0;
+		if ( BLEDataSize > 2 )
+		{
+			BLE_devices[ Index ].Data[ 2 ] = BLEData[ 2 ];
+		}
+		BLE_devices[ Index ].Data[ 3 ] = ( BLEDataSize > 3 ) ? BLEData[ 3 ] : 0;
+		memcpy( BLE_devices[ Index ].Data + 4, ManufactureData,
+		        ManufactureDataSize );
+		BLE_devices[ Index ].DataSize = ManufactureDataSize + 4;
 		break;
 	}
 
@@ -796,10 +974,15 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 	SWITCHBOT Device;
 	if ( GetSWDevice( Index, Device ) )
 	{
-		int bytes = snprintf( Buf, BufSize,
-		                      "{\"hubMAC\":\"%s\",\"address\":\"%s\",\"rssi\":%"
-		                      "i,\"serviceData\":",
-		                      macAddress, Device.MAC, Device.rssi );
+		bool truncated = false;
+		int bytes = AppendJsonf( Buf, BufSize, 0, truncated,
+		                        "{\"hubMAC\":\"%s\",\"address\":\"%s\",\"rssi\":%"
+		                        "i,\"serviceData\":",
+		                        macAddress, Device.MAC, Device.rssi );
+		if ( truncated )
+		{
+			return 0;
+		}
 
 		int rem = BufSize - bytes;
 		if ( rem < 64 )
@@ -811,8 +994,8 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 		switch ( Device.model )
 		{
 		case CURTAIN_DATA_ID: {
-			bytes += snprintf(
-			    Buf + bytes, rem,
+			bytes = AppendJsonf(
+			    Buf, BufSize, bytes, truncated,
 			    "{\"model\":\"%c\",\"modelName\":\"WoCurtain\",\"calibration\":"
 			    "%s,\"battery\":%i,\"position\":%i,\"lightLevel\":%i}}",
 			    Device.model, ( Device.curtain.calibration ? "true" : "false" ),
@@ -823,8 +1006,8 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 		}
 
 		case CURTAIN3_DATA_ID: {
-			bytes += snprintf(
-			    Buf + bytes, BufSize - bytes,
+			bytes = AppendJsonf(
+			    Buf, BufSize, bytes, truncated,
 			    "{\"model\":\"%c\",\"modelName\":\"WoCurtain3\","
 			    "\"calibration\":%s,\"battery\":%i,\"position\":%i,"
 			    "\"lightLevel\":%i}}",
@@ -837,8 +1020,8 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 
 		case ROLLERBLIND_DATA_ID:
 		case ROLLERBLIND2_DATA_ID: {
-			bytes += snprintf(
-			    Buf + bytes, BufSize - bytes,
+			bytes = AppendJsonf(
+			    Buf, BufSize, bytes, truncated,
 			    "{\"model\":\"%c\",\"modelName\":\"WoRollerBlind\","
 			    "\"calibration\":%s,\"battery\":%i,\"position\":%i}}",
 			    Device.model, ( Device.curtain.calibration ? "true" : "false" ),
@@ -848,53 +1031,119 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 		}
 
 		case BLIND_DATA_ID: {
-			bytes +=
-			    snprintf( Buf + bytes, BufSize - bytes,
-			              "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\","
-			              "\"battery\":%i,\"position\":%i,\"version\":%i}}",
-			              Device.model, Device.blind.battery,
-			              Device.blind.position, Device.blind.version );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"WoBlindTilt\","
+			                     "\"battery\":%i,\"position\":%i,\"version\":%i}}",
+			                     Device.model, Device.blind.battery,
+			                     Device.blind.position, Device.blind.version );
 
 			break;
 		}
 
 		case BOT_DATA_ID: {
-			bytes +=
-			    snprintf( Buf + bytes, BufSize - bytes,
-			              "{\"model\":\"%c\",\"modelName\":\"WoHand\",\"mode\":"
-			              "%s,\"battery\":%i,\"state\":%i}}",
-			              Device.model, ( Device.bot.mode ? "true" : "false" ),
-			              Device.bot.battery, Device.bot.state );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"WoHand\",\"mode\":"
+			                     "%s,\"battery\":%i,\"state\":%i}}",
+			                     Device.model, ( Device.bot.mode ? "true" : "false" ),
+			                     Device.bot.battery, Device.bot.state );
+
+			break;
+		}
+
+		case LOCK_DATA_ID:
+		case LOCKPRO_DATA_ID:
+		case LOCKPRO_V368_DATA_ID: {
+			const bool isLockProModel = ( Device.model == LOCKPRO_DATA_ID ) || ( Device.model == LOCKPRO_V368_DATA_ID );
+			const bool isLegacyLockPro = ( Device.model == LOCKPRO_V368_DATA_ID );
+			const char* modelName = isLockProModel ? "WoSmartLockPro" : "WoSmartLock";
+			const char* lockState = "locked";
+			if ( Device.Lock.status == 1 )
+			{
+				lockState = "unlocked";
+			}
+			else if ( isLockProModel && Device.Lock.status == 3 )
+			{
+				lockState = "latched";
+			}
+			else if ( Device.Lock.status == 2 )
+			{
+				lockState = "jammed";
+			}
+			else if ( isLegacyLockPro )
+			{
+				if ( Device.Lock.status == 4 )
+				{
+					lockState = "locking_stop";
+				}
+				else if ( Device.Lock.status == 5 )
+				{
+					lockState = "unlocking_stop";
+				}
+				else if ( Device.Lock.status == 6 )
+				{
+					lockState = "not_fully_locked";
+				}
+				else if ( Device.Lock.status == 255 )
+				{
+					lockState = "unknown";
+				}
+			}
+
+			const bool isLockedState = ( Device.Lock.status == 0 ) ||
+			                           ( isLockProModel && Device.Lock.status == 3 );
+
+			bytes = AppendJsonf(
+			    Buf, BufSize, bytes, truncated,
+			    "{\"model\":\"%c\",\"modelName\":\"%s\","
+			    "\"battery\":%i,\"calibration\":%s,\"status\":%i,"
+			    "\"lockState\":\"%s\",\"doorOpen\":%s,\"locked\":%s,"
+			    "\"updateFromSecondaryLock\":%s,\"doubleLockMode\":%s,"
+			    "\"unclosedAlarm\":%s,\"unlockedAlarm\":%s,"
+			    "\"autoLockPaused\":%s,\"nightLatch\":%s,\"sequence\":%i}}",
+			    Device.model, modelName,
+			    Device.Lock.battery,
+			    ( Device.Lock.calibration ? "true" : "false" ),
+			    Device.Lock.status,
+			    lockState,
+			    ( Device.Lock.doorOpen ? "true" : "false" ),
+			    ( isLockedState ? "true" : "false" ),
+			    ( Device.Lock.updateFromSecondaryLock ? "true" : "false" ),
+			    ( Device.Lock.doubleLockMode ? "true" : "false" ),
+			    ( Device.Lock.unclosedAlarm ? "true" : "false" ),
+			    ( Device.Lock.unlockedAlarm ? "true" : "false" ),
+			    ( Device.Lock.autoLockPaused ? "true" : "false" ),
+			    ( Device.Lock.nightLatch ? "true" : "false" ),
+			    Device.Lock.sequence );
 
 			break;
 		}
 
 		case TH_I_DATA_ID:
 		case TH_T_DATA_ID: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":\"WoSensorTH\","
-			                   "\"temperature\":{\"c\": "
-			                   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
-			                   Device.model, Device.thermometer.temperature,
-			                   Device.thermometer.battery,
-			                   Device.thermometer.humidity );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"WoSensorTH\","
+			                     "\"temperature\":{\"c\": "
+			                     "%0.1f},\"battery\":%i,\"humidity\":%i}}",
+			                     Device.model, Device.thermometer.temperature,
+			                     Device.thermometer.battery,
+			                     Device.thermometer.humidity );
 
 			break;
 		}
 
 		case PRESENCE_DATA_ID: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":\"WoPresence\","
-			                   "\"motion\":%i,\"battery\":%i,\"light\":%i}}",
-			                   Device.model, Device.Presence.motion,
-			                   Device.Presence.battery, Device.Presence.light );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"WoPresence\","
+			                     "\"motion\":%i,\"battery\":%i,\"light\":%i}}",
+			                     Device.model, Device.Presence.motion,
+			                     Device.Presence.battery, Device.Presence.light );
 
 			break;
 		}
 
 		case CONTACT_DATA_ID: {
-			bytes += snprintf(
-			    Buf + bytes, BufSize - bytes,
+			bytes = AppendJsonf(
+			    Buf, BufSize, bytes, truncated,
 			    "{\"model\":\"%c\",\"modelName\":\"WoContact\",\"motion\":%i,"
 			    "\"battery\":%i,\"light\":%i,\"contact\":%i,\"leftOpen\":%i,"
 			    "\"lastMotion\":%i,\"lastContact\":%i,\"buttonPresses\":%i,"
@@ -909,18 +1158,18 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 		}
 
 		case REMOTE_DATA_ID: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":\"WoRemote\","
-			                   "\"data1\":%i,\"data2\":%i,\"data3\":%i}}",
-			                   Device.model, Device.Remote.data1,
-			                   Device.Remote.data2, Device.Remote.data3 );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"WoRemote\","
+			                     "\"data1\":%i,\"data2\":%i,\"data3\":%i}}",
+			                     Device.model, Device.Remote.data1,
+			                     Device.Remote.data2, Device.Remote.data3 );
 
 			break;
 		}
 
 		case BULB_DATA_ID: {
-			bytes += snprintf(
-			    Buf + bytes, BufSize - bytes,
+			bytes = AppendJsonf(
+			    Buf, BufSize, bytes, truncated,
 			    "{\"model\":\"%c\",\"modelName\":\"WoBulb\",\"sequence\":%i,"
 			    "\"on_off\":%i,\"dim\":%i,\"lightState\":%i}}",
 			    Device.model, Device.Bulb.sequence, Device.Bulb.on_off,
@@ -931,61 +1180,61 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 
 		case IOTH_DATA_ID:
 		case IOTH_DATA_ID2: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":\"WoIOSensor\","
-			                   "\"temperature\":{\"c\": "
-			                   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
-			                   Device.model, Device.thermometer.temperature,
-			                   Device.thermometer.battery,
-			                   Device.thermometer.humidity );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"WoIOSensor\","
+			                     "\"temperature\":{\"c\": "
+			                     "%0.1f},\"battery\":%i,\"humidity\":%i}}",
+			                     Device.model, Device.thermometer.temperature,
+			                     Device.thermometer.battery,
+			                     Device.thermometer.humidity );
 
 			break;
 		}
 
 		case WATERLEAK_DATA_ID: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":"
-			                   "\"WoWaterLeak\",\"battery\":%i,\"status\":%i}}",
-			                   Device.model, Device.WaterLeak.battery,
-			                   Device.WaterLeak.status );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":"
+			                     "\"WoWaterLeak\",\"battery\":%i,\"status\":%i}}",
+			                     Device.model, Device.WaterLeak.battery,
+			                     Device.WaterLeak.status );
 
 			break;
 		}
 
 		case PLUG_DATA_ID: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":\"Plug\","
-			                   "\"state\":%s,\"wifiRSSI\":%i,\"overload\":%s,\"power\":%i}}",
-			                   Device.model,
-			                   ( Device.Plug.state ? "true" : "false" ),
-			                   Device.Plug.wifiRSSI,
-			                   ( Device.Plug.overload ? "true" : "false" ),
-			                   Device.Plug.power );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"Plug\","
+			                     "\"state\":%s,\"wifiRSSI\":%i,\"overload\":%s,\"power\":%i}}",
+			                     Device.model,
+			                     ( Device.Plug.state ? "true" : "false" ),
+			                     Device.Plug.wifiRSSI,
+			                     ( Device.Plug.overload ? "true" : "false" ),
+			                     Device.Plug.power );
 
 			break;
 		}
 
 		case METERPRO_DATA_ID: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":\"MeterPro\","
-			                   "\"temperature\":{\"c\": "
-			                   "%0.1f},\"battery\":%i,\"humidity\":%i}}",
-			                   Device.model, Device.thermometer.temperature,
-			                   Device.thermometer.battery,
-			                   Device.thermometer.humidity );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"MeterPro\","
+			                     "\"temperature\":{\"c\": "
+			                     "%0.1f},\"battery\":%i,\"humidity\":%i}}",
+			                     Device.model, Device.thermometer.temperature,
+			                     Device.thermometer.battery,
+			                     Device.thermometer.humidity );
 
 			break;
 		}
 
 		case METERPROCO2_DATA_ID: {
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"model\":\"%c\",\"modelName\":\"MeterPro(CO2)\","
-			                   "\"temperature\":{\"c\": "
-			                   "%0.1f},\"battery\":%i,\"humidity\":%i, \"co2\":%i}}",
-			                   Device.model, Device.MeterProCO2.temperature,
-			                   Device.MeterProCO2.battery,
-			                   Device.MeterProCO2.humidity,
-			                   Device.MeterProCO2.co2 );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"model\":\"%c\",\"modelName\":\"MeterPro(CO2)\","
+			                     "\"temperature\":{\"c\": "
+			                     "%0.1f},\"battery\":%i,\"humidity\":%i, \"co2\":%i}}",
+			                     Device.model, Device.MeterProCO2.temperature,
+			                     Device.MeterProCO2.battery,
+			                     Device.MeterProCO2.humidity,
+			                     Device.MeterProCO2.co2 );
 
 			break;
 		}
@@ -994,23 +1243,28 @@ int BLE_Device::DeviceToJson( uint8_t Index, char* Buf, int BufSize,
 			if ( ( ( PRESENCE2_DATA_LONG_ID1[ 0 ] == Device.modelTriByte[ 0 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 1 ] == Device.modelTriByte[ 2 ] ) && ( PRESENCE2_DATA_LONG_ID1[ 2 ] == Device.modelTriByte[ 2 ] ) ) ||
 			     ( ( PRESENCE2_DATA_LONG_ID2[ 0 ] == Device.modelTriByte[ 0 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 1 ] == Device.modelTriByte[ 1 ] ) && ( PRESENCE2_DATA_LONG_ID2[ 2 ] == Device.modelTriByte[ 2 ] ) ) )
 			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-				                   "{\"model\":\"Presence\",\"modelName\":\"Presence(mm)\","
-				                   "\"presence\":%i,\"battery\":%i,\"light\":%i}}",
-				                   Device.Presence.motion,
-				                   Device.Presence.battery, Device.Presence.light );
+				bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+				                     "{\"model\":\"Presence\",\"modelName\":\"Presence(mm)\","
+				                     "\"presence\":%i,\"battery\":%i,\"light\":%i}}",
+				                     Device.Presence.motion,
+				                     Device.Presence.battery, Device.Presence.light );
 			}
 			else
 			{
-				bytes += snprintf( Buf + bytes, BufSize - bytes,
-				                   "{\"error\": \"Unknown model %X, %X, %X\"}}", Device.modelTriByte[ 0 ], Device.modelTriByte[ 1 ], Device.modelTriByte[ 2 ] );
+				bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+				                     "{\"error\": \"Unknown model %X, %X, %X\"}}", Device.modelTriByte[ 0 ], Device.modelTriByte[ 1 ], Device.modelTriByte[ 2 ] );
 			}
 			break;
 		}
 
 		default:
-			bytes += snprintf( Buf + bytes, BufSize - bytes,
-			                   "{\"error\": \"Unknown model %c\"}}", Device.model );
+			bytes = AppendJsonf( Buf, BufSize, bytes, truncated,
+			                     "{\"error\": \"Unknown model %c\"}}", Device.model );
+		}
+
+		if ( truncated )
+		{
+			return 0;
 		}
 
 		return bytes;
@@ -1042,8 +1296,8 @@ int BLE_Device::AllToJson( char* Buf, int BufSize, bool OnlyChanged,
 	*Buf = '[';
 	for ( uint8_t i = 0; i < NumDevices; i++ )
 	{
-		// Leave at least 256 bytes for the next device plus closing bracket/null
-		if ( ( BufSize - totaleBytes ) < 256 )
+		// Leave enough room for the largest device row plus closing bracket/null.
+		if ( ( BufSize - totaleBytes ) < 384 )
 		{
 			break;
 		}
@@ -1109,11 +1363,11 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 		return false;
 	}
 
-	SW_Device.model = Device.Data[ 0 ];
+	SW_Device.model = ( Device.Data[ 0 ] & 0x7F );
 	strcpy( SW_Device.MAC, Device.MAC );
 	SW_Device.rssi = Device.rssi;
 
-	switch ( Device.Data[ 0 ] )
+	switch ( SW_Device.model )
 	{
 	case TH_I_DATA_ID:
 	case TH_T_DATA_ID: {
@@ -1122,6 +1376,12 @@ bool BLE_Device::parseDevice( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 	case BOT_DATA_ID: {
 		return parseBot( Device, SW_Device );
+	}
+
+	case LOCK_DATA_ID:
+	case LOCKPRO_DATA_ID:
+	case LOCKPRO_V368_DATA_ID: {
+		return parseLock( Device, SW_Device );
 	}
 
 	case CURTAIN_DATA_ID:
@@ -1206,6 +1466,111 @@ bool BLE_Device::parseBot( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
 
 	// Serial.printf( "Bot: MAC = %s, state = %i, battery = %i\n", Device.MAC,
 	// SW_Device.bot.state, SW_Device.bot.battery );
+	return true;
+}
+
+bool BLE_Device::parseLock( BLE_DEVICE& Device, SWITCHBOT& SW_Device )
+{
+	if ( Device.DataSize < LOCK_DATA_SIZE )
+	{
+		return false;
+	}
+
+	uint8_t byte1 = Device.Data[ 1 ];
+	uint8_t byte2 = Device.Data[ 2 ];
+	uint8_t byte3 = ( Device.DataSize > 3 ) ? Device.Data[ 3 ] : 0;
+	bool isLockProModel = ( SW_Device.model == LOCKPRO_DATA_ID ) || ( SW_Device.model == LOCKPRO_V368_DATA_ID );
+	bool isLegacyLockPro = ( SW_Device.model == LOCKPRO_V368_DATA_ID );
+	bool hasMfgData = ( Device.DataSize >= 4 );
+	uint8_t mfg7 = ( Device.DataSize >= 12 ) ? Device.Data[ 11 ] : 0;
+	uint8_t mfg8 = ( Device.DataSize >= 13 ) ? Device.Data[ 12 ] : 0;
+	uint8_t mfg9 = ( Device.DataSize >= 14 ) ? Device.Data[ 13 ] : 0;
+	uint8_t mfg11 = ( Device.DataSize >= 16 ) ? Device.Data[ 15 ] : 0;
+
+	SW_Device.Lock.updateFromSecondaryLock = false;
+	SW_Device.Lock.doubleLockMode = false;
+	SW_Device.Lock.unclosedAlarm = false;
+	SW_Device.Lock.unlockedAlarm = false;
+	SW_Device.Lock.autoLockPaused = false;
+	SW_Device.Lock.nightLatch = false;
+	SW_Device.Lock.sequence = byte3;
+	SW_Device.Lock.battery = byte2 & 0x7F;
+
+	if ( hasMfgData && isLockProModel && isLegacyLockPro )
+	{
+		// Lock Pro '$' model mapping: status inferred from manufacturer byte[9].
+		SW_Device.Lock.calibration = ( ( mfg7 & 0x80 ) != 0 );
+
+		uint8_t mask30 = mfg9 & 0x30;
+		uint8_t mask08 = mfg9 & 0x08;
+		if ( mask30 == 0x30 )
+		{
+			SW_Device.Lock.status = 3; // latched
+			SW_Device.Lock.nightLatch = true;
+		}
+		else if ( mask08 == 0x08 )
+		{
+			SW_Device.Lock.status = 1; // unlocked
+			SW_Device.Lock.nightLatch = false;
+		}
+		else
+		{
+			SW_Device.Lock.status = 0; // locked
+			SW_Device.Lock.nightLatch = false;
+		}
+
+		// Door contact is decoded from service data bit4. Manufacturer byte[8]
+		// changes with lock transitions and is not stable for door state.
+		SW_Device.Lock.doorOpen = ( ( byte1 & 0x10 ) != 0 );
+		SW_Device.Lock.autoLockPaused = ( ( mfg8 & 0x20 ) != 0 );
+		SW_Device.Lock.unclosedAlarm = ( ( mfg11 & 0x80 ) != 0 );
+		SW_Device.Lock.unlockedAlarm = ( ( mfg11 & 0x40 ) != 0 );
+	}
+	else
+	{
+		// Latest v4.x lock parsing from serviceData only.
+		uint8_t statusCode = ( byte1 & 0x0F );
+		if ( statusCode == 1 )
+		{
+			SW_Device.Lock.status = 1; // unlocked
+		}
+		else if ( statusCode == 2 )
+		{
+			SW_Device.Lock.status = 2; // jammed
+		}
+		else
+		{
+			SW_Device.Lock.status = 0; // locked
+		}
+
+		SW_Device.Lock.doorOpen = ( ( byte1 & 0x10 ) != 0 );
+		SW_Device.Lock.calibration = ( ( byte1 & 0x80 ) != 0 );
+
+		if ( isLockProModel && Device.DataSize >= 14 )
+		{
+			// Refine Lock Pro state from manufacturer byte[9]:
+			// 0xB0 => latched, 0x88 => unlocked, 0x80 => locked.
+			uint8_t mask30 = mfg9 & 0x30;
+			uint8_t mask08 = mfg9 & 0x08;
+
+			if ( mask30 == 0x30 )
+			{
+				SW_Device.Lock.status = 3; // latched
+				SW_Device.Lock.nightLatch = true;
+			}
+			else if ( mask08 == 0x08 )
+			{
+				SW_Device.Lock.status = 1; // unlocked
+				SW_Device.Lock.nightLatch = false;
+			}
+			else
+			{
+				SW_Device.Lock.status = 0; // locked
+				SW_Device.Lock.nightLatch = false;
+			}
+		}
+	}
+
 	return true;
 }
 
