@@ -2,3 +2,13 @@ env.json
 .vscode/
 .vs/
 secrets.h
+
+# Arduino build output. Keep only distributable OTA firmware binaries.
+build/
+!build/
+!build/esp32.esp32.esp32/
+build/esp32.esp32.esp32/*
+!build/esp32.esp32.esp32/SwitchBotBLEHub.ino.bin
+!build/esp32.esp32.esp32s3/
+build/esp32.esp32.esp32s3/*
+!build/esp32.esp32.esp32s3/SwitchBotBLEHub.ino.bin

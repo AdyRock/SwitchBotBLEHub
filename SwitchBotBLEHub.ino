@@ -34,7 +34,7 @@
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.15";
+const char* version = "Hello! SwitchBot BLE Hub V2.16";
 
 struct POST_BODY_BUFFER
 {
@@ -583,7 +583,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
     <div class="wrap">
       <div class="card">
         <h1>SwitchBot BLE Hub</h1>
-        <p class="ver">Version 2.15</p>
+        <p class="ver">Version 2.16</p>
         <div class="links">
           <a class="btn" href="/update">Update firmware</a>
 					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
@@ -823,6 +823,13 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			.section-head h2 { margin: 0; }
 			.clear-btn { background: #3c3c3c; color: #fff; border: 1px solid #555; border-radius: 6px; padding: 0.3rem 0.55rem; font-size: 0.78rem; cursor: pointer; }
 			.clear-btn:hover { background: #555; }
+			.section-actions { display: flex; align-items: center; gap: 0.45rem; }
+			.device-stats-wrap { overflow-x: auto; }
+			.device-stats-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+			.device-stats-table th, .device-stats-table td { border-bottom: 1px solid #3c3c3c; padding: 0.45rem 0.5rem; text-align: left; }
+			.device-stats-table th { color: #9cdcfe; font-weight: 600; }
+			.device-stats-table td.num { text-align: right; }
+			.device-stats-empty { color: #9aa0a6; font-size: 0.85rem; }
 		</style>
 	</head>
 	<body>
@@ -844,6 +851,16 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				<section class="block">
 					<h2>Memory and System</h2>
 					<div class="stats" id="memStats"></div>
+				</section>
+				<section class="block">
+					<div class="section-head">
+						<h2>Device Service Data Stats</h2>
+						<div class="section-actions">
+							<button class="clear-btn" type="button" onclick="copyDeviceServiceStatsTable()">Copy Table</button>
+							<button class="clear-btn" type="button" onclick="clearDeviceServiceStats()">Clear</button>
+						</div>
+					</div>
+					<div class="device-stats-wrap" id="deviceServiceStats"></div>
 				</section>
 				<section class="block">
 					<div class="section-head">
@@ -877,6 +894,9 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 			var statsErrorText = "";
 			var statsErrorUntilMs = 0;
 			var scanControlBusy = false;
+			var deviceStatsRows = [];
+			var deviceStatsSortCol = 'advertisements';
+			var deviceStatsSortAsc = false;
 
 			window.getStatsDebug = function() {
 				return {
@@ -914,6 +934,123 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				var ss = rem % 60;
 				function pad2(n) { return n < 10 ? "0" + n : "" + n; }
 				return days + ", " + pad2(hh) + ":" + pad2(mm) + ":" + pad2(ss);
+			}
+
+			function escHtml(text) {
+				return String(text || "")
+					.replace(/&/g, "&amp;")
+					.replace(/</g, "&lt;")
+					.replace(/>/g, "&gt;")
+					.replace(/\"/g, "&quot;");
+			}
+
+			function formatElapsedSinceMs(lastSeenAtMs) {
+				var timestamp = Number(lastSeenAtMs || 0);
+				if (!timestamp) {
+					return "Never";
+				}
+
+				var elapsedSeconds = Math.max(0, Math.floor((Date.now() - statsClockOffsetMs - timestamp) / 1000));
+				var hours = Math.floor(elapsedSeconds / 3600);
+				var minutes = Math.floor((elapsedSeconds % 3600) / 60);
+				var seconds = elapsedSeconds % 60;
+				return hours + ":" + String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+			}
+
+			function sortAndRenderDeviceServiceStats() {
+				var host = document.getElementById("deviceServiceStats");
+				if (!host) {
+					return;
+				}
+
+				if (!Array.isArray(deviceStatsRows) || deviceStatsRows.length === 0) {
+					host.innerHTML = '<div class="device-stats-empty">No device service-data statistics yet.</div>';
+					return;
+				}
+
+				var sorted = deviceStatsRows.slice().sort(function(a, b) {
+					var col = deviceStatsSortCol;
+					var asc = deviceStatsSortAsc;
+					var factor = asc ? 1 : -1;
+
+					if (col === 'name') {
+						var an = String(a && a.name || "").toUpperCase();
+						var bn = String(b && b.name || "").toUpperCase();
+						if (an < bn) return -1 * factor;
+						if (an > bn) return 1 * factor;
+						return 0;
+					}
+
+					if (col === 'lastSeenAtMs') {
+						var at = Number(a && a.lastSeenAtMs || 0);
+						var bt = Number(b && b.lastSeenAtMs || 0);
+						if (at !== bt) return (at - bt) * factor;
+						var an2 = String(a && a.name || "").toUpperCase();
+						var bn2 = String(b && b.name || "").toUpperCase();
+						if (an2 < bn2) return -1;
+						if (an2 > bn2) return 1;
+						return 0;
+					}
+
+					var av = Number(a && a[col] || 0);
+					var bv = Number(b && b[col] || 0);
+					if (av !== bv) return (av - bv) * factor;
+					var an3 = String(a && a.name || "").toUpperCase();
+					var bn3 = String(b && b.name || "").toUpperCase();
+					if (an3 < bn3) return -1;
+					if (an3 > bn3) return 1;
+					return 0;
+				});
+
+				function thStyle(col) {
+					return ' style="cursor:pointer;user-select:none;" onclick="deviceServiceStatsSortBy(\'' + col + '\')"';
+				}
+
+				function sortArrow(col) {
+					if (deviceStatsSortCol !== col) return '';
+					return deviceStatsSortAsc ? ' &#9650;' : ' &#9660;';
+				}
+
+				var html = '';
+				html += '<table class="device-stats-table">';
+				html += '<thead><tr>';
+				html += '<th' + thStyle('name') + '>Device' + sortArrow('name') + '</th>';
+				html += '<th' + thStyle('missing') + '>Missing' + sortArrow('missing') + '</th>';
+				html += '<th' + thStyle('present') + '>Present' + sortArrow('present') + '</th>';
+				html += '<th' + thStyle('advertisements') + '>Adverts' + sortArrow('advertisements') + '</th>';
+				html += '<th' + thStyle('rssi') + '>RSSI' + sortArrow('rssi') + '</th>';
+				html += '<th' + thStyle('lastSeenAtMs') + '>Last Seen' + sortArrow('lastSeenAtMs') + '</th>';
+				html += '</tr></thead><tbody>';
+
+				for (var i = 0; i < sorted.length; i++) {
+					var row = sorted[i] || {};
+					html += '<tr>';
+					html += '<td>' + escHtml(row.name || "Unknown") + '</td>';
+					html += '<td class="num">' + Number(row.missing || 0) + '</td>';
+					html += '<td class="num">' + Number(row.present || 0) + '</td>';
+					html += '<td class="num">' + Number(row.advertisements || 0) + '</td>';
+					html += '<td class="num">' + Number(row.rssi || 0) + '</td>';
+					html += '<td>' + formatElapsedSinceMs(row.lastSeenAtMs || 0) + '</td>';
+					html += '</tr>';
+				}
+
+				html += '</tbody></table>';
+				host.innerHTML = html;
+			}
+
+			function renderDeviceServiceStats(rows) {
+				deviceStatsRows = Array.isArray(rows) ? rows : [];
+				sortAndRenderDeviceServiceStats();
+			}
+
+			function deviceServiceStatsSortBy(col) {
+				if (deviceStatsSortCol === col) {
+					deviceStatsSortAsc = !deviceStatsSortAsc;
+				} else {
+					deviceStatsSortCol = col;
+					deviceStatsSortAsc = (col === 'name');
+				}
+				sortAndRenderDeviceServiceStats();
 			}
 
 			function getStatsRemainingSeconds() {
@@ -1008,6 +1145,7 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 				mem += mkStat("Diag: Push posts", (s.diagPushPostCount || 0) + " (err " + (s.diagPushPostErrorCount || 0) + ")", null, "Callback POST attempts and failures.");
 				mem += mkStat("Diag: API hits", "stats " + (s.diagStatsRequests || 0) + " | devices " + (s.diagDevicesRequests || 0), null, "Total /api/v1/stats and /api/v1/devices requests since boot.");
 				document.getElementById("memStats").innerHTML = mem;
+				renderDeviceServiceStats(s.deviceStats || []);
 				renderUnknownTypes(s.unknownTypes || []);
 				updateScanControls(s);
 
@@ -1123,6 +1261,96 @@ static const char STATS_HTML[] PROGMEM = R"HTMLEOF(
 						statsErrorUntilMs = Date.now() + 15000;
 						updateStatsMeta();
 					});
+			}
+
+			function clearDeviceServiceStats() {
+				fetch('/api/v1/stats/device-stats/clear', { method: 'POST' })
+					.then(function(r) {
+						if (!r.ok) throw new Error('HTTP ' + r.status);
+						return r.json();
+					})
+					.then(function() {
+						deviceStatsRows = [];
+						sortAndRenderDeviceServiceStats();
+						loadStats();
+					})
+					.catch(function(e) {
+						statsErrorText = String(e);
+						statsErrorUntilMs = Date.now() + 15000;
+						updateStatsMeta();
+					});
+			}
+
+			function copyDeviceServiceStatsTable() {
+				var table = document.querySelector('#deviceServiceStats table');
+				if (!table) {
+					statsErrorText = 'No table data to copy';
+					statsErrorUntilMs = Date.now() + 5000;
+					updateStatsMeta();
+					return;
+				}
+
+				var lines = [];
+				var headerCells = table.querySelectorAll('thead th');
+				var header = [];
+				headerCells.forEach(function(th) {
+					header.push(String(th.textContent || '').replace(/[▲▼]/g, '').trim());
+				});
+				lines.push(header.join('\t'));
+
+				var bodyRows = table.querySelectorAll('tbody tr');
+				bodyRows.forEach(function(tr) {
+					var cells = tr.querySelectorAll('td');
+					var row = [];
+					cells.forEach(function(td) {
+						row.push(String(td.textContent || '').replace(/\s+/g, ' ').trim());
+					});
+					lines.push(row.join('\t'));
+				});
+
+				var text = lines.join('\n');
+				if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+					navigator.clipboard.writeText(text)
+						.then(function() {
+							statsErrorText = '';
+							updateStatsMeta();
+						})
+						.catch(function() {
+							fallbackCopyDeviceServiceStatsText(text);
+						});
+					return;
+				}
+
+				fallbackCopyDeviceServiceStatsText(text);
+			}
+
+			function fallbackCopyDeviceServiceStatsText(text) {
+				var ta = document.createElement('textarea');
+				ta.value = text;
+				ta.setAttribute('readonly', 'readonly');
+				ta.style.position = 'fixed';
+				ta.style.top = '-1000px';
+				document.body.appendChild(ta);
+				ta.select();
+				ta.setSelectionRange(0, ta.value.length);
+
+				var copied = false;
+				try {
+					copied = document.execCommand('copy');
+				} catch (e) {
+					copied = false;
+				}
+
+				document.body.removeChild(ta);
+				if (!copied) {
+					statsErrorText = 'Could not copy table automatically';
+					statsErrorUntilMs = Date.now() + 7000;
+					updateStatsMeta();
+					return;
+				}
+
+				statsErrorText = '';
+				updateStatsMeta();
 			}
 
 			function closeFreeHeapHistory() {
@@ -2526,9 +2754,16 @@ AsyncWebServer server( 80 );
 DNSServer dns;
 AsyncUDP udp;
 AsyncEventSource bleEvents( "/api/v1/events" );
+bool DiscoveryUdpListening = false;
+bool WiFiConnectedLastLoop = false;
+uint32_t LastWiFiReconnectAttemptAtMs = 0;
+uint8_t WiFiReconnectAttemptCount = 0;
+uint32_t LastDiscoveryStartAttemptAtMs = 0;
 
 const IPAddress DISCOVERY_MULTICAST_IP( 239, 1, 2, 3 );
 const uint16_t DISCOVERY_PORT = 1234;
+const uint32_t WIFI_RECONNECT_INTERVAL_MS = 5000;
+const uint8_t WIFI_RECONNECTS_BEFORE_FULL_RESTART = 6;
 
 ESPAsyncHTTPUpdateServer _updateServer;
 
@@ -2607,6 +2842,7 @@ const uint32_t SCAN_MEMORY_RECOVERY_COOLDOWN_MS = 120000;
 const uint32_t SCAN_MEMORY_RECOVERY_LARGEST_BLOCK_THRESHOLD = 17000;
 const uint16_t FREE_HEAP_HISTORY_MAX = 1000;
 const uint8_t UNKNOWN_TYPE_MAX = 100;
+const uint8_t DEVICE_RUNTIME_STATS_MAX = 50;
 const uint8_t HOMEY_HISTORY_MAX = 10;
 
 struct PUSH_UPDATE_LOG_ENTRY
@@ -2657,6 +2893,19 @@ struct UNKNOWN_TYPE_ENTRY
 };
 UNKNOWN_TYPE_ENTRY UnknownTypes[ UNKNOWN_TYPE_MAX ];
 uint8_t UnknownTypeCount = 0;
+
+struct DEVICE_RUNTIME_STATS_ENTRY
+{
+	char mac[ 18 ];
+	uint32_t advertisements;
+	uint32_t present;
+	uint32_t missing;
+	int rssi;
+	uint32_t lastSeenAtMs;
+};
+
+DEVICE_RUNTIME_STATS_ENTRY DeviceRuntimeStats[ DEVICE_RUNTIME_STATS_MAX ];
+uint8_t DeviceRuntimeStatsCount = 0;
 
 static void ExtractIpFromUri( const char* uri, char* outIp, int outSize )
 {
@@ -3130,6 +3379,72 @@ static void RecordUnknownType( uint8_t type, const char* mac, bool hasSubtype = 
 	}
 }
 
+static int FindDeviceRuntimeStatsIndexLocked( const char* mac )
+{
+	if ( !IsValidMacAddress( mac ) )
+	{
+		return -1;
+	}
+
+	for ( uint8_t i = 0; i < DeviceRuntimeStatsCount; i++ )
+	{
+		if ( DeviceRuntimeStats[ i ].mac[ 0 ] != '\0' && StrEqualsIgnoreCase( DeviceRuntimeStats[ i ].mac, mac ) )
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+static int EnsureDeviceRuntimeStatsIndexLocked( const char* mac )
+{
+	int index = FindDeviceRuntimeStatsIndexLocked( mac );
+	if ( index >= 0 )
+	{
+		return index;
+	}
+
+	if ( DeviceRuntimeStatsCount >= DEVICE_RUNTIME_STATS_MAX )
+	{
+		return -1;
+	}
+
+	index = DeviceRuntimeStatsCount++;
+	memset( &DeviceRuntimeStats[ index ], 0, sizeof( DeviceRuntimeStats[ index ] ) );
+	strncpy( DeviceRuntimeStats[ index ].mac, mac, sizeof( DeviceRuntimeStats[ index ].mac ) - 1 );
+	DeviceRuntimeStats[ index ].mac[ sizeof( DeviceRuntimeStats[ index ].mac ) - 1 ] = '\0';
+	DeviceRuntimeStats[ index ].rssi = 0;
+	DeviceRuntimeStats[ index ].lastSeenAtMs = 0;
+	return index;
+}
+
+static void RecordDeviceRuntimeStats( const char* mac, bool hasServiceDataPayload, int rssi )
+{
+	if ( !IsValidMacAddress( mac ) )
+	{
+		return;
+	}
+
+	lockHistory();
+	int index = EnsureDeviceRuntimeStatsIndexLocked( mac );
+	if ( index >= 0 )
+	{
+		DeviceRuntimeStats[ index ].advertisements++;
+		if ( hasServiceDataPayload )
+		{
+			DeviceRuntimeStats[ index ].present++;
+		}
+		else
+		{
+			DeviceRuntimeStats[ index ].missing++;
+		}
+		DeviceRuntimeStats[ index ].rssi = rssi;
+		DeviceRuntimeStats[ index ].lastSeenAtMs = millis();
+	}
+	unlockHistory();
+}
+
 static void SampleCpuUsage()
 {
 	uint32_t totalRunTime = 0;
@@ -3291,6 +3606,101 @@ static void HandleDiscoveryPacket( AsyncUDPPacket& packet, const char* listenerN
 	}
 }
 
+static bool StartDiscoveryUdp()
+{
+	const uint32_t now = millis();
+	if ( LastDiscoveryStartAttemptAtMs != 0 &&
+	     ( uint32_t )( now - LastDiscoveryStartAttemptAtMs ) < WIFI_RECONNECT_INTERVAL_MS )
+	{
+		return DiscoveryUdpListening;
+	}
+	LastDiscoveryStartAttemptAtMs = now;
+
+	udp.close();
+	DiscoveryUdpListening = false;
+
+	if ( WiFi.status() != WL_CONNECTED )
+	{
+		return false;
+	}
+
+	if ( !udp.listenMulticast( DISCOVERY_MULTICAST_IP, DISCOVERY_PORT ) )
+	{
+		Serial.printf( "Failed to join multicast %s:%u\n",
+		               DISCOVERY_MULTICAST_IP.toString().c_str(),
+		               ( unsigned int )DISCOVERY_PORT );
+		return false;
+	}
+
+	udp.onPacket( []( AsyncUDPPacket packet ) {
+		Serial.println( "Received multicast packet" );
+		HandleDiscoveryPacket( packet, "multicast" );
+	} );
+	DiscoveryUdpListening = true;
+	Serial.printf( "UDP listening on %s (%s:%u)\n",
+	               WiFi.localIP().toString().c_str(),
+	               DISCOVERY_MULTICAST_IP.toString().c_str(),
+	               ( unsigned int )DISCOVERY_PORT );
+	return true;
+}
+
+static void MaintainWiFiConnection()
+{
+	const bool connected = ( WiFi.status() == WL_CONNECTED ) &&
+	                       ( WiFi.localIP() != IPAddress( 0, 0, 0, 0 ) );
+
+	if ( connected )
+	{
+		if ( !WiFiConnectedLastLoop )
+		{
+			Serial.printf( "WiFi reconnected after %u attempt(s), IP: %s\n",
+			               ( unsigned int )WiFiReconnectAttemptCount,
+			               WiFi.localIP().toString().c_str() );
+			StartDiscoveryUdp();
+		}
+		else if ( !DiscoveryUdpListening )
+		{
+			StartDiscoveryUdp();
+		}
+
+		WiFiReconnectAttemptCount = 0;
+		WiFiConnectedLastLoop = true;
+		return;
+	}
+
+	DiscoveryUdpListening = false;
+	if ( WiFiConnectedLastLoop )
+	{
+		Serial.println( "WiFi connection lost - starting reconnect" );
+		WiFiConnectedLastLoop = false;
+		LastWiFiReconnectAttemptAtMs = 0;
+		WiFiReconnectAttemptCount = 0;
+		LastDiscoveryStartAttemptAtMs = 0;
+	}
+
+	const uint32_t now = millis();
+	if ( ( uint32_t )( now - LastWiFiReconnectAttemptAtMs ) < WIFI_RECONNECT_INTERVAL_MS )
+	{
+		return;
+	}
+
+	WiFiReconnectAttemptCount++;
+	LastWiFiReconnectAttemptAtMs = now;
+
+	if ( ( WiFiReconnectAttemptCount % WIFI_RECONNECTS_BEFORE_FULL_RESTART ) == 0 )
+	{
+		Serial.printf( "WiFi reconnect attempt %u - restarting station without erasing credentials\n",
+		               ( unsigned int )WiFiReconnectAttemptCount );
+		WiFi.disconnect( false, false );
+		WiFi.begin();
+	}
+	else
+	{
+		Serial.printf( "WiFi reconnect attempt %u\n", ( unsigned int )WiFiReconnectAttemptCount );
+		WiFi.reconnect();
+	}
+}
+
 // Stream raw packet data to web clients if the MAC matches the hot MAC
 void streamRawPacketData( const char* MAC, int rssi, const uint8_t* serviceData, uint8_t serviceDataSize, const uint8_t* manufacturerData, uint8_t manufacturerDataSize )
 {
@@ -3415,64 +3825,84 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks
 		NumAdvertsSeen++;
 		IncrementVolatileU32( DiagScanOnResultCalls );
 		LastAdvertSeenAtMs = millis();
+
+		const NimBLEAddress& address = advertisedDevice->getAddress();
+		char deviceAddress[ 18 ];
+		FormatBleAddress( address, deviceAddress, sizeof( deviceAddress ) );
+		int rssi = advertisedDevice->getRSSI();
+		bool knownDevice = ( BLE_Devices.FindDevice( deviceAddress ) >= 0 );
+
 		const uint8_t* serviceDataBuf = nullptr;
 		uint8_t serviceDataLen = 0;
 		const uint8_t* manufacturerDataBuf = nullptr;
 		uint8_t manufacturerDataLen = 0;
-		if ( ExtractSwitchBotAdvData( advertisedDevice, &serviceDataBuf, &serviceDataLen,
-		                             &manufacturerDataBuf, &manufacturerDataLen ) )
+
+		if ( !ExtractSwitchBotAdvData( advertisedDevice, &serviceDataBuf, &serviceDataLen,
+		                              &manufacturerDataBuf, &manufacturerDataLen ) )
 		{
-			const NimBLEAddress& address = advertisedDevice->getAddress();
-			char deviceAddress[ 18 ];
-			FormatBleAddress( address, deviceAddress, sizeof( deviceAddress ) );
-			if ( serviceDataLen == 0 )
+			// MAC-based missing tracking for known devices, even when service-data parsing fails.
+			if ( knownDevice )
 			{
 				NumMatchedEmptyPayload++;
-				return;
+				RecordDeviceRuntimeStats( deviceAddress, false, rssi );
 			}
-			NumMatchedServiceData++;
-			bool dataUpdated = false;
-			bool failedValidation = false;
-			bool unknownType = false;
+			return;
+		}
 
-			// Always stream raw packet data if this device matches the hot MAC,
-			// regardless of whether AddDevice succeeds or fails validation
-			int rssi = advertisedDevice->getRSSI();
-			streamRawPacketData( deviceAddress, rssi, serviceDataBuf, serviceDataLen, manufacturerDataBuf, manufacturerDataLen );
+		if ( serviceDataLen == 0 )
+		{
+			if ( knownDevice )
+			{
+				NumMatchedEmptyPayload++;
+				RecordDeviceRuntimeStats( deviceAddress, false, rssi );
+			}
+			return;
+		}
 
-			if ( BLE_Devices.AddDevice( deviceAddress, rssi, address.getType(), ( uint8_t* )serviceDataBuf, serviceDataLen, ( uint8_t* )manufacturerDataBuf, manufacturerDataLen, &dataUpdated, &failedValidation, &unknownType ) )
+		NumMatchedServiceData++;
+		bool dataUpdated = false;
+		bool failedValidation = false;
+		bool unknownType = false;
+
+		// Always stream raw packet data if this device matches the hot MAC,
+		// regardless of whether AddDevice succeeds or fails validation
+		streamRawPacketData( deviceAddress, rssi, serviceDataBuf, serviceDataLen, manufacturerDataBuf, manufacturerDataLen );
+
+		bool addAccepted = BLE_Devices.AddDevice( deviceAddress, rssi, address.getType(), ( uint8_t* )serviceDataBuf, serviceDataLen, ( uint8_t* )manufacturerDataBuf, manufacturerDataLen, &dataUpdated, &failedValidation, &unknownType );
+		bool recognizedDevice = knownDevice || ( BLE_Devices.FindDevice( deviceAddress ) >= 0 );
+		if ( recognizedDevice )
+		{
+			RecordDeviceRuntimeStats( deviceAddress, true, rssi );
+		}
+
+		if ( addAccepted )
+		{
+			// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
+			NumUpdates++;
+			if ( dataUpdated )
 			{
-				// Serial.printf( "Updated device: %s\n", advertisedDevice->getAddress().toString().c_str() );
-				NumUpdates++;
-				if ( dataUpdated )
-				{
-					NumActualDataUpdates++;
-				}
-				pendingSSEUpdate = true;
+				NumActualDataUpdates++;
 			}
-			else
+			pendingSSEUpdate = true;
+		}
+		else
+		{
+			if ( failedValidation && unknownType )
 			{
-				if ( failedValidation && unknownType )
+				if ( serviceDataBuf[ 0 ] == 0 && serviceDataLen >= 7 )
 				{
-					if ( serviceDataBuf[ 0 ] == 0 && serviceDataLen >= 7 )
-					{
-						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddress, true, serviceDataBuf[ 4 ], serviceDataBuf[ 5 ], serviceDataBuf[ 6 ] );
-					}
-					else
-					{
-						RecordUnknownType( serviceDataBuf[ 0 ], deviceAddress );
-					}
-					NumMatchedRejected++;
+					RecordUnknownType( serviceDataBuf[ 0 ], deviceAddress, true, serviceDataBuf[ 4 ], serviceDataBuf[ 5 ], serviceDataBuf[ 6 ] );
 				}
-				else if ( failedValidation )
+				else
 				{
-					NumBadDataRejected++;
+					RecordUnknownType( serviceDataBuf[ 0 ], deviceAddress );
 				}
+				NumMatchedRejected++;
 			}
-			// else
-			// {
-			// 	Serial.printf( "Ignored device: %s\n", advertisedDevice->getAddress().toString().c_str() );
-			// }
+			else if ( failedValidation )
+			{
+				NumBadDataRejected++;
+			}
 		}
 	}; // onResult
 
@@ -3526,6 +3956,8 @@ void setup()
 		Serial.println( "Failed to create hotMAC mutex" );
 	}
 
+	WiFi.persistent( true );
+	WiFi.setAutoReconnect( true );
 	AsyncWiFiManager wifiManager( &server, &dns );
 	//    wifiManager.resetSettings();
 	wifiManager.autoConnect( "SwitchBot_ESP32" );
@@ -3548,7 +3980,7 @@ void setup()
 	server.on( "/api/v1/devices/table", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 		Serial.println( "Received request for devices table" );
-		AsyncWebServerResponse* response = request->beginResponse( 200, "text/html", ( const uint8_t* )DEVICES_TABLE_HTML, sizeof( DEVICES_TABLE_HTML ) - 1 );
+		AsyncWebServerResponse* response = request->beginResponse_P( 200, "text/html", ( const uint8_t* )DEVICES_TABLE_HTML, sizeof( DEVICES_TABLE_HTML ) - 1 );
 		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
 		request->send( response );
 		digitalWrite( led, 0 );
@@ -3556,7 +3988,7 @@ void setup()
 
 	server.on( "/api/v1/stats/page", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
-		AsyncWebServerResponse* response = request->beginResponse( 200, "text/html", ( const uint8_t* )STATS_HTML, sizeof( STATS_HTML ) - 1 );
+		AsyncWebServerResponse* response = request->beginResponse_P( 200, "text/html", ( const uint8_t* )STATS_HTML, sizeof( STATS_HTML ) - 1 );
 		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
 		response->addHeader( "Pragma", "no-cache" );
 		response->addHeader( "Expires", "0" );
@@ -4025,6 +4457,26 @@ void setup()
 		digitalWrite( led, 0 );
 	} );
 
+	server.on( "/api/v1/stats/device-stats/clear", HTTP_POST, []( AsyncWebServerRequest* request ) {
+		digitalWrite( led, 1 );
+
+		lockHistory();
+		DeviceRuntimeStatsCount = 0;
+		for ( uint8_t i = 0; i < DEVICE_RUNTIME_STATS_MAX; i++ )
+		{
+			DeviceRuntimeStats[ i ].mac[ 0 ] = '\0';
+			DeviceRuntimeStats[ i ].advertisements = 0;
+			DeviceRuntimeStats[ i ].present = 0;
+			DeviceRuntimeStats[ i ].missing = 0;
+			DeviceRuntimeStats[ i ].rssi = 0;
+			DeviceRuntimeStats[ i ].lastSeenAtMs = 0;
+		}
+		unlockHistory();
+
+		request->send( 200, "application/json", "{\"ok\":true,\"message\":\"Device stats cleared\"}" );
+		digitalWrite( led, 0 );
+	} );
+
 	server.on( "/api/v1/homey/monitor", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
 
@@ -4174,7 +4626,23 @@ void setup()
 		STATS_APPEND( ",\"diagDiscoveryAnnouncementsTx\":%lu", ( unsigned long )DiagDiscoveryAnnouncementsTx );
 		STATS_APPEND( ",\"diagPushPostCount\":%lu", ( unsigned long )DiagPushPostCount );
 		STATS_APPEND( ",\"diagPushPostErrorCount\":%lu", ( unsigned long )DiagPushPostErrorCount );
-		STATS_APPEND( ",\"unknownTypes\":[" );
+		STATS_APPEND( ",\"deviceStats\":[" );
+
+		lockHistory();
+		for ( uint8_t i = 0; i < DeviceRuntimeStatsCount; i++ )
+		{
+			STATS_APPEND( "%s{\"name\":\"%s\",\"missing\":%lu,\"present\":%lu,\"advertisements\":%lu,\"rssi\":%d,\"lastSeenAtMs\":%lu}",
+			              i > 0 ? "," : "",
+			              DeviceRuntimeStats[ i ].mac,
+			              ( unsigned long )DeviceRuntimeStats[ i ].missing,
+			              ( unsigned long )DeviceRuntimeStats[ i ].present,
+			              ( unsigned long )DeviceRuntimeStats[ i ].advertisements,
+			              DeviceRuntimeStats[ i ].rssi,
+			              ( unsigned long )DeviceRuntimeStats[ i ].lastSeenAtMs );
+		}
+		unlockHistory();
+
+		STATS_APPEND( "],\"unknownTypes\":[" );
 
 		lockHistory();
 		for ( uint8_t i = 0; i < UnknownTypeCount; i++ )
@@ -4287,7 +4755,7 @@ void setup()
 
 	server.on( "/api/v1/device/viewer", HTTP_GET, []( AsyncWebServerRequest* request ) {
 		digitalWrite( led, 1 );
-		AsyncWebServerResponse* response = request->beginResponse( 200, "text/html", ( const uint8_t* )RAW_PACKET_VIEWER_HTML, sizeof( RAW_PACKET_VIEWER_HTML ) - 1 );
+		AsyncWebServerResponse* response = request->beginResponse_P( 200, "text/html", ( const uint8_t* )RAW_PACKET_VIEWER_HTML, sizeof( RAW_PACKET_VIEWER_HTML ) - 1 );
 		response->addHeader( "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0" );
 		response->addHeader( "Pragma", "no-cache" );
 		response->addHeader( "Expires", "0" );
@@ -4373,18 +4841,8 @@ void setup()
 	RecordBleRateHistory( LastAdvertsSeenPerMinute, LastUpdatesPerMinute, LastActualDataUpdatesPerMinute );
 	SampleCpuUsage();
 
-	if ( udp.listenMulticast( IPAddress( 239, 1, 2, 3 ), 1234 ) )
-	{
-		Serial.print( "UDP Listening on IP: " );
-		Serial.println( WiFi.localIP() );
-		udp.onPacket( []( AsyncUDPPacket packet ) {
-			Serial.println( "Received multicast packet" );
-			HandleDiscoveryPacket( packet, "multicast" ); } );
-	}
-	else
-	{
-		Serial.printf( "Failed to join multicast 39.1.2.3:1234\n" );
-	}
+	StartDiscoveryUdp();
+	WiFiConnectedLastLoop = ( WiFi.status() == WL_CONNECTED );
 
 } // End of setup.
 
@@ -4393,6 +4851,8 @@ void loop()
 {
 	for ( ;; )
 	{
+		MaintainWiFiConnection();
+
 		if ( RebootRequired )
 		{
 			// Allow watchdog to restart the CPU
@@ -4427,7 +4887,7 @@ void loop()
 			IncrementVolatileU32( DiagSseStatsSent );
 		}
 
-		if ( millis() >= sendBroadcast )
+		if ( WiFiConnectedLastLoop && DiscoveryUdpListening && millis() >= sendBroadcast )
 		{
 			// Send multicast
 			// Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
@@ -4512,7 +4972,7 @@ void loop()
 			}
 		}
 
-		if ( BLE_Devices.HasChanged() )
+		if ( WiFiConnectedLastLoop && BLE_Devices.HasChanged() )
 		{
 			static char outstr[ 50 ];
 
@@ -4611,6 +5071,12 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 {
 	// host = "192.168.1.1", ip or dns
 
+	if ( WiFi.status() != WL_CONNECTED )
+	{
+		Serial.printf( "Skipping send to %s while WiFi is disconnected\n", host );
+		return -1;
+	}
+
 	Serial.printf( "Connecting to %s to send %s\n", host, data );
 
 	WiFiClient client;
@@ -4620,6 +5086,8 @@ int SendDeviceChange( const char* host, const char* data, int bytes )
 	http.begin( client, host ); // HTTP
 	http.addHeader( "Content-Type", "application/json" );
 	http.setReuse( false );
+	http.setConnectTimeout( 3000 );
+	http.setTimeout( 3000 );
 
 	// start connection and send HTTP header
 	int httpCode = http.POST( ( uint8_t* )data, bytes );
