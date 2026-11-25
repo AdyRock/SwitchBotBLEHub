@@ -20,10 +20,10 @@
 #include <ESPAsyncWiFiManager.h> // https://github.com/alanswx/ESPAsyncWiFiManager
 #include <HTTPClient.h>
 #include <NimBLEDevice.h> // https://github.com/h2zero/NimBLE-Arduino/blob/master/docs/New_user_guide.md
+#include <Update.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
 // #include <ElegantOTA.h>           // https://github.com/ayushsharma82/ElegantOTA
-#include <ESPAsyncHTTPUpdateServer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <stdarg.h>
@@ -34,7 +34,7 @@
 #include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
-const char* version = "Hello! SwitchBot BLE Hub V2.16";
+const char* version = "Hello! SwitchBot BLE Hub V2.17";
 
 struct POST_BODY_BUFFER
 {
@@ -583,7 +583,7 @@ static const char HOME_HTML[] PROGMEM = R"HTMLEOF(
     <div class="wrap">
       <div class="card">
         <h1>SwitchBot BLE Hub</h1>
-        <p class="ver">Version 2.16</p>
+        <p class="ver">Version 2.17</p>
         <div class="links">
           <a class="btn" href="/update">Update firmware</a>
 					<a class="btn" href="/api/v1/stats/page">View runtime stats</a>
@@ -657,6 +657,9 @@ static const char OTA_UPDATE_HTML[] PROGMEM = R"HTMLEOF(
 				var progressFill = document.getElementById('progressFill');
 				var progressLabel = document.getElementById('progressLabel');
 				var statusEl = document.getElementById('status');
+				var maxFirmwareSize = 2027520;
+				var uploadTimeoutMs = 120000;
+				var preUploadUptimeMs = null;
 
 				function setProgress(percent, label) {
 					var safe = Math.max(0, Math.min(100, percent || 0));
@@ -664,9 +667,54 @@ static const char OTA_UPDATE_HTML[] PROGMEM = R"HTMLEOF(
 					progressLabel.textContent = label || ('Uploading ' + safe + '%');
 				}
 
+				function waitForDeviceAfterUpdate() {
+					var startedAt = Date.now();
+					var waitTimeoutMs = 60000;
+					setProgress(100, 'Upload complete; waiting for the device to restart...');
+					statusEl.textContent = 'Firmware was uploaded. Waiting for the device to restart...';
+
+					function checkDevice() {
+						fetch('/api/v1/stats?otaCheck=' + Date.now(), {cache: 'no-store'})
+							.then(function(response) {
+								if (!response.ok) throw new Error('Device is not ready');
+								return response.json();
+							})
+							.then(function(stats) {
+								var currentUptimeMs = Number(stats.uptimeMs);
+								var deviceRestarted = isFinite(currentUptimeMs) &&
+								    (preUploadUptimeMs === null ? currentUptimeMs < 30000 :
+								     currentUptimeMs < preUploadUptimeMs - 1000);
+								if (!deviceRestarted) {
+									throw new Error('Device has not restarted yet');
+								}
+								progressWrap.style.display = 'none';
+								statusEl.textContent = 'Update complete. The device restarted successfully.';
+								setTimeout(function() { window.location.href = '/'; }, 1500);
+							})
+							.catch(function() {
+								if (Date.now() - startedAt >= waitTimeoutMs) {
+									uploadBtn.disabled = false;
+									statusEl.textContent = 'The upload completed, but the device did not respond after restarting. Power-cycle it before retrying.';
+									return;
+								}
+								setTimeout(checkDevice, 1000);
+							});
+					}
+
+					setTimeout(checkDevice, 3000);
+				}
+
 				fileInput.addEventListener('change', function() {
 					if (fileInput.files && fileInput.files.length > 0) {
-						fileNameEl.textContent = fileInput.files[0].name;
+						var selectedFile = fileInput.files[0];
+						fileNameEl.textContent = selectedFile.name;
+						if (/merged/i.test(selectedFile.name)) {
+							statusEl.textContent = 'A merged image is for serial flashing. Select SwitchBotBLEHub.ino.bin for OTA.';
+						} else if (selectedFile.size > maxFirmwareSize) {
+							statusEl.textContent = 'Firmware image is too large for the 2 MB OTA partition.';
+						} else {
+							statusEl.textContent = '';
+						}
 					} else {
 						fileNameEl.textContent = 'No file selected. Example: SwitchBotBLEHub.ino.bin';
 					}
@@ -679,8 +727,18 @@ static const char OTA_UPDATE_HTML[] PROGMEM = R"HTMLEOF(
 						return;
 					}
 
+					var selectedFile = fileInput.files[0];
+					if (/merged/i.test(selectedFile.name)) {
+						statusEl.textContent = 'Update rejected: select SwitchBotBLEHub.ino.bin, not the merged image.';
+						return;
+					}
+					if (selectedFile.size > maxFirmwareSize) {
+						statusEl.textContent = 'Update rejected: firmware must fit in the 2 MB OTA partition.';
+						return;
+					}
+
 					var body = new FormData();
-					body.append('firmware', fileInput.files[0]);
+					body.append('firmware', selectedFile);
 
 					uploadBtn.disabled = true;
 					statusEl.textContent = 'Preparing...';
@@ -690,8 +748,10 @@ static const char OTA_UPDATE_HTML[] PROGMEM = R"HTMLEOF(
 					function startUpload() {
 						statusEl.textContent = 'Uploading...';
 						setProgress(0, 'Starting upload...');
-						var uploadComplete = false;
+						var responseReceived = false;
+						var uploadBodyComplete = false;
 						var xhr = new XMLHttpRequest();
+						xhr.timeout = uploadTimeoutMs;
 						xhr.open('POST', '/ota?name=firmware', true);
 						xhr.upload.onprogress = function(e) {
 							if (e.lengthComputable) {
@@ -700,33 +760,66 @@ static const char OTA_UPDATE_HTML[] PROGMEM = R"HTMLEOF(
 							}
 						};
 						xhr.upload.onload = function() {
-							uploadComplete = true;
-							progressWrap.style.display = 'none';
-							statusEl.textContent = 'Programming... Please wait while the device restarts.';
-							setTimeout(function() {
-								window.location.href = '/';
-							}, 5000);
+							uploadBodyComplete = true;
+							setProgress(100, 'Upload received; waiting for update result...');
 						};
 						xhr.onload = function() {
-							if (!uploadComplete) {
+							responseReceived = true;
+							if (xhr.status >= 200 && xhr.status < 300) {
+								if (/Update error:/i.test(xhr.responseText || '')) {
+									uploadBtn.disabled = false;
+									statusEl.textContent = 'Update failed: ' + xhr.responseText;
+									return;
+								}
+								waitForDeviceAfterUpdate();
+							} else {
 								uploadBtn.disabled = false;
 								statusEl.textContent = 'Update failed (HTTP ' + xhr.status + ').';
 								fetch('/api/v1/ota/cancel', {method: 'POST'}).catch(function(){});
 							}
 						};
 						xhr.onerror = function() {
-							if (!uploadComplete) {
+							if (uploadBodyComplete) {
+								waitForDeviceAfterUpdate();
+								return;
+							}
+							if (!responseReceived) {
 								uploadBtn.disabled = false;
 								statusEl.textContent = 'Upload failed due to network error.';
 								fetch('/api/v1/ota/cancel', {method: 'POST'}).catch(function(){});
 							}
 						};
-						xhr.send(body);
+						xhr.ontimeout = function() {
+							responseReceived = true;
+							if (uploadBodyComplete) {
+								waitForDeviceAfterUpdate();
+							} else {
+								uploadBtn.disabled = false;
+								statusEl.textContent = 'Upload timed out after 120 seconds.';
+								fetch('/api/v1/ota/cancel', {method: 'POST'}).catch(function(){});
+							}
+						};
+						setTimeout(function() { xhr.send(body); }, 1000);
 					}
 
 					fetch('/api/v1/ota/prepare', {method: 'POST'})
-						.then(function() { startUpload(); })
-						.catch(function() { startUpload(); });
+						.then(function(response) {
+							if (!response.ok) throw new Error('Could not prepare device');
+							return fetch('/api/v1/stats?beforeOta=' + Date.now(), {cache: 'no-store'});
+						})
+						.then(function(response) {
+							if (!response.ok) throw new Error('Could not read device status');
+							return response.json();
+						})
+						.then(function(stats) {
+							var uptimeMs = Number(stats.uptimeMs);
+							preUploadUptimeMs = isFinite(uptimeMs) ? uptimeMs : null;
+							startUpload();
+						})
+						.catch(function() {
+							preUploadUptimeMs = null;
+							startUpload();
+						});
 				});
 			})();
 		</script>
@@ -2765,9 +2858,11 @@ const uint16_t DISCOVERY_PORT = 1234;
 const uint32_t WIFI_RECONNECT_INTERVAL_MS = 5000;
 const uint8_t WIFI_RECONNECTS_BEFORE_FULL_RESTART = 6;
 
-ESPAsyncHTTPUpdateServer _updateServer;
-
-unsigned long ota_progress_millis = 0;
+volatile uint32_t otaRestartAtMs = 0;
+volatile bool otaUploadSucceeded = false;
+volatile bool otaUploadFailed = false;
+volatile size_t otaUploadBytes = 0;
+volatile uint8_t otaUploadLastLoggedPercent = 0;
 
 const int led = 14;
 
@@ -4782,7 +4877,14 @@ void setup()
 			otaInProgress = true;
 			BLEScan* pBLEScan = BLEDevice::getScan();
 			pBLEScan->stop();
-			Serial.println( "BLE scan stopped for OTA upload" );
+			for ( int i = 0; i < 50 && pBLEScan->isScanning(); i++ )
+			{
+				delay( 20 );
+			}
+			WiFi.setSleep( false );
+			Serial.printf( "BLE scan stopped for OTA upload (heap %lu, largest block %lu)\n",
+			               ( unsigned long )esp_get_free_heap_size(),
+			               ( unsigned long )heap_caps_get_largest_free_block( MALLOC_CAP_8BIT ) );
 		}
 		request->send( 200, "application/json", "{\"ok\":true}" );
 	} );
@@ -4791,6 +4893,7 @@ void setup()
 		if ( otaInProgress )
 		{
 			otaInProgress = false;
+			WiFi.setSleep( true );
 			BLEScan* pBLEScan = BLEDevice::getScan();
 			if ( !ScanPausedByUser )
 			{
@@ -4809,7 +4912,97 @@ void setup()
 
 	//	server.onNotFound( handleNotFound );
 
-	_updateServer.setup( &server, "/ota" );
+	server.on(
+	    "/ota", HTTP_POST,
+	    []( AsyncWebServerRequest* request ) {
+		    AsyncWebServerResponse* response;
+		    if ( otaUploadSucceeded && !otaUploadFailed )
+		    {
+			    response = request->beginResponse(
+			        200, "application/json",
+			        "{\"ok\":true,\"message\":\"Update complete; rebooting\"}" );
+			    otaInProgress = false;
+			    otaRestartAtMs = millis() + 1500;
+			    Serial.printf( "OTA upload complete (%u bytes); restart scheduled\n",
+			                   ( unsigned int )otaUploadBytes );
+		    }
+		    else
+		    {
+			    response = request->beginResponse(
+			        500, "application/json",
+			        "{\"ok\":false,\"error\":\"Firmware update failed\"}" );
+			    Serial.println( "OTA upload failed before completion" );
+		    }
+		    response->addHeader( "Cache-Control", "no-store" );
+		    response->addHeader( "Connection", "close" );
+		    request->send( response );
+	    },
+	    []( AsyncWebServerRequest* request, String filename, size_t index,
+	        uint8_t* data, size_t len, bool final ) {
+		    if ( otaUploadFailed )
+		    {
+			    return;
+		    }
+
+		    if ( index == 0 )
+		    {
+			    otaUploadSucceeded = false;
+			    otaUploadFailed = false;
+			    otaUploadBytes = 0;
+			    otaUploadLastLoggedPercent = 0;
+
+			    const uint32_t maxSketchSpace =
+			        ( ESP.getFreeSketchSpace() - 0x1000 ) & 0xFFFFF000;
+			    Serial.printf( "OTA upload started: %s (partition limit %u bytes)\n",
+			                   filename.c_str(), ( unsigned int )maxSketchSpace );
+			    if ( !Update.begin( maxSketchSpace, U_FLASH ) )
+			    {
+				    otaUploadFailed = true;
+				    Update.printError( Serial );
+				    return;
+			    }
+		    }
+
+		    if ( len > 0 )
+		    {
+			    if ( Update.write( data, len ) != len )
+			    {
+				    otaUploadFailed = true;
+				    Update.printError( Serial );
+				    return;
+			    }
+			    otaUploadBytes += len;
+			    const size_t contentLength = request->contentLength();
+			    const uint8_t percent =
+			        contentLength > 0 ?
+			            ( uint8_t )( ( ( uint64_t )otaUploadBytes * 100 ) /
+			                         ( uint64_t )contentLength ) :
+			            0;
+			    const uint8_t milestone = ( percent / 10 ) * 10;
+			    if ( milestone > otaUploadLastLoggedPercent )
+			    {
+				    otaUploadLastLoggedPercent = milestone;
+				    Serial.printf( "OTA upload progress: %u%% (%u bytes)\n",
+				                   ( unsigned int )milestone,
+				                   ( unsigned int )otaUploadBytes );
+			    }
+		    }
+
+		    if ( final )
+		    {
+			    if ( Update.end( true ) )
+			    {
+				    otaUploadSucceeded = true;
+				    Serial.printf( "OTA flash write verified (%u bytes)\n",
+				                   ( unsigned int )otaUploadBytes );
+			    }
+			    else
+			    {
+				    otaUploadFailed = true;
+				    Update.printError( Serial );
+			    }
+		    }
+	    } );
 
 	server.addHandler( &bleEvents );
 	server.begin();
@@ -4851,6 +5044,14 @@ void loop()
 {
 	for ( ;; )
 	{
+		if ( otaRestartAtMs != 0 &&
+		     ( int32_t )( millis() - otaRestartAtMs ) >= 0 )
+		{
+			Serial.println( "Restarting after OTA response" );
+			Serial.flush();
+			ESP.restart();
+		}
+
 		MaintainWiFiConnection();
 
 		if ( RebootRequired )
@@ -4887,7 +5088,7 @@ void loop()
 			IncrementVolatileU32( DiagSseStatsSent );
 		}
 
-		if ( WiFiConnectedLastLoop && DiscoveryUdpListening && millis() >= sendBroadcast )
+		if ( !otaInProgress && WiFiConnectedLastLoop && DiscoveryUdpListening && millis() >= sendBroadcast )
 		{
 			// Send multicast
 			// Serial.printf( "\n***Broadcasting my details: %s, %s***\n", macAddress, WiFi.localIP().toString().c_str() );
@@ -4972,7 +5173,7 @@ void loop()
 			}
 		}
 
-		if ( WiFiConnectedLastLoop && BLE_Devices.HasChanged() )
+		if ( !otaInProgress && WiFiConnectedLastLoop && BLE_Devices.HasChanged() )
 		{
 			static char outstr[ 50 ];
 
